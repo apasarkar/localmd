@@ -299,9 +299,9 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
     return net_frames
  
 
-def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, frame_corrector_obj = None, max_consec_failures = 1):
+def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1):
     
-    load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank, batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size, frame_corrector_obj = frame_corrector_obj)
+    load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank, batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size, registration_routine = registration_routine)
     
     #Decide which chunks of the data you will use for the spatial PMD blockwise fits
     window_chunks = 2000 #We will sample chunks of frames throughout the movie

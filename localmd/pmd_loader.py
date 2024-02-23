@@ -65,11 +65,11 @@ def truncated_random_svd(input_matrix, key, rank, num_oversamples=10):
 
 
 class FrameDataloader():
-    def __init__(self, dataset, batch_size, frame_corrector=None, dtype="float32"):
+    def __init__(self, dataset, batch_size, registration_routine=None, dtype="float32"):
         self.dataset = dataset
         self.chunks = math.ceil(self.shape[2]/batch_size)
         self.batch_size = batch_size
-        self.frame_corrector = frame_corrector
+        self.registration_routine = registration_routine
         self.dtype=dtype
         
         
@@ -99,8 +99,8 @@ class FrameDataloader():
             data = self.dataset.get_frames(keys).astype(self.dtype)
         else:
             raise ValueError
-        if self.frame_corrector is not None:
-            data = self.frame_corrector.register_frames(data.transpose(2, 0, 1)).transpose(1, 2, 0)
+        if self.registration_routine is not None:
+            data = self.registration_routine(data.transpose(2, 0, 1)).transpose(1, 2, 0)
         else:
             data = data
         return data
@@ -109,9 +109,9 @@ class FrameDataloader():
 
 
 class PMDLoader():
-    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, frame_corrector_obj = None, num_samples = 8):
+    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, registration_routine = None, num_samples = 8):
         '''
-        Inputs: 
+        Args: 
             dataset: Object which implements the PMDDataset abstract interface. This is a basic reader which allows us to read frames of the input data. 
             dtype: np.dtype. intended format of data
             center: bool. whether or not to center the data before denoising
@@ -120,10 +120,8 @@ class PMDLoader():
             batch_size: max number of frames to load into memory (CPU and GPU) at a time
             num_workers: int, keep it at 0 for now. Number of workers used in pytorch dataloading. Experimental and best kept at 0. 
             pixel_batch_size: int. maximum number of pixels of data we load onto GPU at any point in time
-            frame_corrector_obj: jnormcorre frame corrector object. This is used to register loaded data on the fly. So in a complete pipeline, like the maskNMF pipeline, we can load data, correct it on the fly, and compress it. Avoids the need to explicitly rewrite the data onto disk during registration. 
+            registration_routine (Callable): Registration function which takes as input (T, x, y) arrays and outputs a (T, x, y) array.
             num_samples: int. when we estimate mean and noise variance, we take 8 samples of the data, each sample has 'batch_size' number of continuous frames. If there are fewer than num_samples * batch_size frames in the dataset, we just sequentially load the entire dataset to get these estimates. 
-        
-        
         '''
         self._order = "F" 
         self.dataset = dataset
@@ -133,13 +131,13 @@ class PMDLoader():
         self.shape = self.dataset.shape
         self._estimate_batch_size(frame_const=batch_size)
         self.pixel_batch_size=pixel_batch_size
-        self.frame_corrector = frame_corrector_obj
+        self.registration_routine = registration_routine
         self.num_samples = num_samples
         
         def regular_collate(batch):
             return batch[0]
-        self.curr_dataloader = FrameDataloader(self.dataset, self.batch_size, frame_corrector = self.frame_corrector, dtype=self.dtype)
-        self.curr_dataloader_vanilla = FrameDataloader(self.dataset, self.batch_size, frame_corrector = None, dtype=self.dtype)
+        self.curr_dataloader = FrameDataloader(self.dataset, self.batch_size, registration_routine = self.registration_routine, dtype=self.dtype)
+        self.curr_dataloader_vanilla = FrameDataloader(self.dataset, self.batch_size, registration_routine = None, dtype=self.dtype)
         if num_workers is None:
             num_cpu = multiprocessing.cpu_count()
             num_workers = min(num_cpu - 1, len(self.tiff_dataobj))
@@ -188,7 +186,7 @@ class PMDLoader():
             A (potentially motion-corrected) array containing these frames from the tiff dataset with shape (d1, d2, T) where d1, d2 are FOV dimensions, T is 
             number of frames selected
         '''
-        if self.frame_corrector is not None:
+        if self.registration_routine is not None:
             frame_length = len(frames) 
             result = np.zeros((self.shape[0], self.shape[1], frame_length))
             
@@ -200,7 +198,7 @@ class PMDLoader():
                 end_point = min(k + self.batch_size, frame_length)
                 curr_frames = frames[start_point:end_point]
                 x = self.dataset.get_frames(curr_frames).astype(self.dtype).transpose(2,0,1)
-                result[:, :, start_point:end_point] = np.array(self.frame_corrector.register_frames(x)).transpose(1,2,0)
+                result[:, :, start_point:end_point] = np.array(self.registration_routine(x)).transpose(1,2,0)
             return result
         else:
             return self.dataset.get_frames(frames).astype(self.dtype)
@@ -376,8 +374,8 @@ class PMDLoader():
             std_img_r = self.std_img.reshape((-1, 1), order=self.order)
             start = 0
 
-            if self.frame_corrector is not None:
-                registration_alg = self.frame_corrector.register_frames
+            if self.registration_routine is not None:
+                registration_alg = self.registration_routine
                 def registration_function(frames):
                     '''
                     The registration function currently takes input as (T, d1, d2) where T is the number of frames to be registered, and 
