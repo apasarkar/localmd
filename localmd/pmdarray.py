@@ -35,7 +35,7 @@ class PMDArray():
                 significantly more compression savings over large FOV data.
         """
         self.order = data_order
-        self.T self.d1, self.d2 = data_shape
+        self.T, self.d1, self.d2 = data_shape
         self.U_sparse = U.tocsr()
         self.R = R
         self.s = s
