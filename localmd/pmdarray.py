@@ -4,6 +4,7 @@ import scipy.sparse
 from typing import *
 from scipy.sparse import csr_matrix
 
+
 class PMDArray():
     def __init__(self, U: scipy.sparse.coo_matrix, R: np.ndarray, s: np.ndarray,
                  V: np.ndarray, data_shape: tuple[int, int, int], data_order: str, mean_img: np.ndarray,
@@ -40,11 +41,11 @@ class PMDArray():
         self.R = R
         self.s = s
         self.V = V
-        self._RsV = (R * s[None, :]).dot(V) #Fewer computations when doing __getitem__
+        self._RsV = (R * s[None, :]).dot(V)  # Fewer computations when doing __getitem__
         self.mean_img = mean_img
         self.var_img = std_img
-        self.row_indices = np.arange(self.d1*self.d2).reshape((self.d1, self.d2), order=self.order)
-    
+        self.row_indices = np.arange(self.d1 * self.d2).reshape((self.d1, self.d2), order=self.order)
+
     @property
     def dtype(self):
         """Data type of the array elements."""
@@ -93,9 +94,7 @@ class PMDArray():
         if key is None:
             raise ValueError("Cannot use None for indexing")
 
-
         return self._RsV[:, self._parse_int_to_list(key)]
-
 
     def __getitem__(self, key) -> np.ndarray:
         """Returns self[key]. Does NOT support dimension expansion."""
@@ -106,7 +105,8 @@ class PMDArray():
             key = (key,)
 
         if len(key) == 1:
-            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(
+                (slice(None, None, None), slice(None, None, None)))
             temporal = self.temporal_crop(key[0])
         elif len(key) == 2:
             spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
@@ -117,12 +117,13 @@ class PMDArray():
         else:
             raise ValueError("Too many values to unpack in __getitem__")
 
-        #Get the unnormalized outputs
+        # Get the unnormalized outputs
         output = spatial.dot(temporal)
-        output = (output.reshape(implied_fov_dims + (-1,), order=self.order) * var_used[:, :, None] +
-                  mean_used[:, :, None])
+        output = output.reshape(implied_fov_dims + (-1,), order=self.order) * \
+                 (np.expand_dims(var_used, axis=len(var_used.shape)) +
+                  np.expand_dims(mean_used, axis=len(mean_used.shape)))
 
-        #Return with the frames as the first dimension
+        # Return with the frames as the first dimension
         output = np.transpose(output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1)))
 
         return output.squeeze().astype(self.dtype)
