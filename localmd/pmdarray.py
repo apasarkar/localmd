@@ -105,17 +105,27 @@ class PMDArray():
         if len(key) == 1:
             spatial, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
             temporal = self.temporal_crop(key[0])
+            mean_used = self.mean_img
+            var_used = self.var_img
         elif len(key) == 2:
             spatial, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
             temporal = self.temporal_crop(key[0])
+            mean_used = self.mean_img[(key[1], slice(None, None, None))]
+            var_used = self.var_img[(key[1], slice(None, None, None))]
+
         elif len(key) == 3:
             spatial, implied_fov_dims = self.spatial_crop((key[1], key[2]))
             temporal = self.temporal_crop(key[0])
+            mean_used = self.mean_img[key[1], key[2]]
+            var_used = self.var_img[key[1], key[2]]
+
         else:
             raise ValueError("Too many values to unpack in __getitem__")
 
+        #Get the unnormalized outputs
         output = spatial.dot(temporal)
-        output = output.reshape(implied_fov_dims + (-1,), order=self.order)
+        output = (output.reshape(implied_fov_dims + (-1,), order=self.order) * var_used[:, :, None] +
+                  mean_used[:, :, None])
 
         #Return with the frames as the first dimension
         output = np.transpose(output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1)))
