@@ -119,8 +119,8 @@ class PMDArray():
 
         # Get the unnormalized outputs
         output = spatial.dot(temporal)
-        output = output.reshape(implied_fov_dims + (-1,), order=self.order) * \
-                 (np.expand_dims(var_used, axis=len(var_used.shape)) +
+        output = (output.reshape(implied_fov_dims + (-1,), order=self.order) *
+                  np.expand_dims(var_used, axis=len(var_used.shape)) +
                   np.expand_dims(mean_used, axis=len(mean_used.shape)))
 
         # Return with the frames as the first dimension
