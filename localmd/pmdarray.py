@@ -103,7 +103,7 @@ class PMDArray():
             key = (key,)
 
         if len(key) == 1:
-            spatial, implied_fov_shape = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
+            spatial, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
             temporal = self.temporal_crop(key[0])
         elif len(key) == 2:
             spatial, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
@@ -115,7 +115,7 @@ class PMDArray():
             raise ValueError("Too many values to unpack in __getitem__")
 
         output = spatial.dot(temporal)
-        output = output.reshape(implied_fov_shape + (-1,), order=self.order)
+        output = output.reshape(implied_fov_dims + (-1,), order=self.order)
 
         #Return with the frames as the first dimension
         output = np.transpose(output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1)))
