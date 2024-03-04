@@ -20,6 +20,7 @@ from tqdm import tqdm
 from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate
 from localmd.pmd_loader import PMDLoader
 from localmd.evaluation import spatial_roughness_stat_vmap, temporal_roughness_stat_vmap, construct_final_fitness_decision, filter_by_failures
+from localmd.pmdarray import PMDArray
 
 import datetime
 import pdb
@@ -440,8 +441,8 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
 
     display("Matrix decomposition completed")
 
-    return U_r, R, s, Vt, std_img, mean_img, shape, order
-
+    final_movie = PMDArray(U_r, R, s, Vt, (shape[2], shape[0], shape[1]), order, mean_img, std_img)
+    return final_movie
 
 def aggregate_UV(U, V, spatial_basis, temporal_basis):
     '''
