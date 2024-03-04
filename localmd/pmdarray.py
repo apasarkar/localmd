@@ -61,13 +61,14 @@ class PMDArray():
         else:
             return elt
 
-    def spatial_crop(self, key) -> tuple[scipy.sparse.csr_matrix, tuple]:
+    def spatial_crop(self, key) -> tuple[scipy.sparse.csr_matrix, np.ndarray, np.ndarray, tuple]:
         """
 
         Args:
             key (tuple): Length 2 tuple used to slice the rows of the data
         Returns:
             U_used (scipy.sparse.csr_matrix). Cropped sparse spatial matrix
+            mean_used (np.ndarray):
             implied_fov (tuple). Tuple of integer(s) specifying the implied FOV dimensions
         """
         if key[0] is None or key[1] is None:
@@ -75,9 +76,11 @@ class PMDArray():
 
         key = (self._parse_int_to_list(key[0]), self._parse_int_to_list(key[1]))
         used_rows = self.row_indices[key[0], key[1]]
+        mean_used = self.mean_img[key[0], key[1]]
+        var_used = self.var_img[key[0], key[1]]
         u_used = self.U_sparse[used_rows.reshape((-1,), order=self.order)]
         implied_fov_shape = used_rows.shape
-        return u_used, implied_fov_shape
+        return u_used, mean_used, var_used, implied_fov_shape
 
     def temporal_crop(self, key: Union[np.ndarray, list, int]) -> np.ndarray:
         """
@@ -103,22 +106,14 @@ class PMDArray():
             key = (key,)
 
         if len(key) == 1:
-            spatial, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
             temporal = self.temporal_crop(key[0])
-            mean_used = self.mean_img
-            var_used = self.var_img
         elif len(key) == 2:
-            spatial, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
             temporal = self.temporal_crop(key[0])
-            mean_used = self.mean_img[(key[1], slice(None, None, None))]
-            var_used = self.var_img[(key[1], slice(None, None, None))]
-
         elif len(key) == 3:
-            spatial, implied_fov_dims = self.spatial_crop((key[1], key[2]))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop((key[1], key[2]))
             temporal = self.temporal_crop(key[0])
-            mean_used = self.mean_img[key[1], key[2]]
-            var_used = self.var_img[key[1], key[2]]
-
         else:
             raise ValueError("Too many values to unpack in __getitem__")
 
