@@ -306,11 +306,11 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     
     #Decide which chunks of the data you will use for the spatial PMD blockwise fits
     window_chunks = 2000 #We will sample chunks of frames throughout the movie
-    if load_obj.shape[2] <= frame_range:
+    if load_obj.shape[0] <= frame_range:
         display("WARNING: Specified using more frames than there are in the dataset.")
-        frame_range = load_obj.shape[2]
+        frame_range = load_obj.shape[0]
         start = 0
-        end = load_obj.shape[2]
+        end = load_obj.shape[0]
         frames = [i for i in range(start, end)]
         if frame_range <= window_chunks:
             display("WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(window_chunks))
@@ -320,7 +320,7 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
             if frame_range < window_chunks:
                 display("WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(window_chunks))
             window_chunks = frame_range
-        frames = identify_window_chunks(frame_range, load_obj.shape[2], window_chunks)
+        frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
         
     block_sizes = block_sizes
@@ -335,7 +335,7 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     data, temporal_basis_crop = load_obj.temporal_crop_with_filter(frames)
     data_std_img = load_obj.std_img #(d1, d2) shape
     data_mean_img = load_obj.mean_img #(d1, d2) shape
-    data_spatial_basis = load_obj.spatial_basis.reshape((load_obj.shape[0], load_obj.shape[1], -1), order=load_obj.order)
+    data_spatial_basis = load_obj.spatial_basis.reshape((load_obj.shape[1], load_obj.shape[2], -1), order=load_obj.order)
     
     ##Run PMD and get the compressed spatial representation of the data
     display("Obtaining blocks and running local SVD")
@@ -441,7 +441,7 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
 
     display("Matrix decomposition completed")
 
-    final_movie = PMDArray(U_r, R, s, Vt, (shape[2], shape[0], shape[1]), order, mean_img, std_img)
+    final_movie = PMDArray(U_r, R, s, Vt, shape, order, mean_img, std_img)
     return final_movie
 
 def aggregate_UV(U, V, spatial_basis, temporal_basis):
