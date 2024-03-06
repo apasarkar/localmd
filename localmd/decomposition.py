@@ -161,8 +161,8 @@ def single_block_md(block, key, rank_placeholder, temporal_avg_factor, spatial_t
     
     return u_mat, good_comps, v_mat
 
-@partial(jit)
-def single_residual_block_md(block, existing, key, rank_placeholder, spatial_thres, temporal_thres):
+@partial(jit, static_argnums=(4,))
+def single_residual_block_md(block, existing, key, rank_placeholder, temporal_avg_factor, spatial_thres, temporal_thres):
     '''
     Matrix Decomposition function for all blocks. 
     Inputs: 
@@ -173,19 +173,23 @@ def single_residual_block_md(block, existing, key, rank_placeholder, spatial_thr
         - spatial_thres. float. We compute a spatial roughness statistic for each spatial component to determine whether it is noise or smoother signal. This is the threshold for that test. 
         - temporal_thres. float. We compute a temporal roughness statistic for each temporal component to determine whether it is noise or smoother signal. This is the threshold for that test. 
     '''
+    order = "F"
     d1, d2, T = block.shape
     net_comps = existing.shape[2]
-    block_2d = jnp.reshape(block, (d1*d2, T), order="F")
-    existing_2d = jnp.reshape(existing, (d1*d2, net_comps), order="F")
+    block_2d = jnp.reshape(block, (d1*d2, T), order=order)
+    existing_2d = jnp.reshape(existing, (d1*d2, net_comps), order=order)
     
     projection = jnp.matmul(existing_2d, jnp.matmul(existing_2d.transpose(), block_2d))
     block_2d = block_2d - projection
     
+    block_r = jnp.reshape(block_2d, (d1*d2, temporal_avg_factor, T//temporal_avg_factor), order=order)
+    block_r_avg = jnp.mean(block_r, axis = 1)
     
-    decomposition = truncated_random_svd(block_2d, key, rank_placeholder)
-    u_mat, v_mat = decomposition[0], decomposition[1]
-    u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order="F")
-
+    
+    u_mat = truncated_random_svd(block_r_avg, key, rank_placeholder)[0]
+    v_mat = jnp.matmul(u_mat.T, jnp.reshape(block_2d, (d1*d2, T), order=order))
+    u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order=order)
+    
     
     # Now we begin the evaluation phase
     good_comps = construct_final_fitness_decision(u_mat, v_mat.T, spatial_thres,\
@@ -249,7 +253,7 @@ def windowed_pmd(window_length, block, max_rank, spatial_thres, temporal_thres, 
             spatial_comps, decisions, _ = single_block_md(subset, key, rank_placeholder, temporal_avg_factor, spatial_thres, temporal_thres)
         else:
             subset = block[:, :, start_value:end_value]
-            spatial_comps, decisions, _ = single_residual_block_md(subset, final_spatial_decomposition, key, rank_placeholder, spatial_thres, temporal_thres)
+            spatial_comps, decisions, _ = single_residual_block_md(subset, final_spatial_decomposition, key, rank_placeholder, temporal_avg_factor, spatial_thres, temporal_thres)
         
         spatial_comps = np.array(spatial_comps)
         decisions = np.array(decisions).flatten() > 0
@@ -506,9 +510,10 @@ def get_projector_noprune(U, tol=0.0001):
 
     singular_values = np.sqrt(eig_vals) 
 
+    random_mat_e = random_mat_e[:, good_components]
+    singular_values = singular_values[good_components]
     random_mat_e = random_mat_e / singular_values[None, :]
 
-    random_mat_e = random_mat_e[:, good_components]
     return (U, random_mat_e)
 
 def get_projector(U, V, rank_prune_target = 3, deterministic = False):
