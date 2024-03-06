@@ -127,10 +127,14 @@ def filter_and_decompose(block,mean_img, std_img,spatial_basis, projection_data,
     
     return single_block_md(block, projection_data, spatial_thres, temporal_thres, max_consec_failures)
     
-@partial(jit)
-def single_block_md(block, key, rank_placeholder, spatial_thres, temporal_thres):
+@partial(jit, static_argnums=(3,))
+def single_block_md(block, key, rank_placeholder, temporal_avg_factor, spatial_thres, temporal_thres):
     '''
     Matrix Decomposition function for all blocks. 
+    Key assumptions: 
+    (1) number of frames in block is divisible by temporal_avg_factor
+    (2) rank_placeholder is smaller than frames // temporal_avg_factor
+    
     Inputs: 
         - block: jnp.array. Dimensions (block_1, block_2, T). (block_1, block_2) are the dimensions of this patch of data, T is the number of frames. We assume that this data has already been centered and noise-normalized
         - key: jax random number key. 
@@ -139,12 +143,16 @@ def single_block_md(block, key, rank_placeholder, spatial_thres, temporal_thres)
         - temporal_thres. float. We compute a temporal roughness statistic for each temporal component to determine whether it is noise or smoother signal. This is the threshold for that test. 
         
     '''
+    order="F"
     d1, d2, T = block.shape
-    block_2d = jnp.reshape(block, (d1*d2, T), order="F")
     
-    decomposition = truncated_random_svd(block_2d, key, rank_placeholder)
-    u_mat, v_mat = decomposition[0], decomposition[1]
-    u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order="F")
+    block_2d = jnp.reshape(block, (d1*d2, temporal_avg_factor, T//temporal_avg_factor), order=order)
+    block_2d_avg = jnp.mean(block_2d, axis = 1)
+    
+    # decomposition = truncated_random_svd(block_2d_avg, key, rank_placeholder)
+    u_mat = truncated_random_svd(block_2d_avg, key, rank_placeholder)[0]
+    v_mat = jnp.matmul(u_mat.T, jnp.reshape(block, (d1*d2, T), order=order))
+    u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order=order)
 
     
     # Now we begin the evaluation phase
@@ -203,7 +211,7 @@ def get_temporal_projector(final_spatial_decomposition, block):
     temporal_decomposition = jnp.matmul(final_spatial_decomposition_r.transpose(), block_r)
     return temporal_decomposition
 
-def windowed_pmd(window_length, block, max_rank, spatial_thres, temporal_thres, max_consec_failures):
+def windowed_pmd(window_length, block, max_rank, spatial_thres, temporal_thres, max_consec_failures, temporal_avg_factor):
     '''
     Implementation of windowed blockwise decomposition. Given a block of the movie (d1, d2, T), we break the movie into smaller chunks. 
     (say (d1, d2, R) where R < T), and run the truncated SVD decomposition iteratively on these blocks. This helps (1) avoid rank blowup and
@@ -238,7 +246,7 @@ def windowed_pmd(window_length, block, max_rank, spatial_thres, temporal_thres, 
         key = make_jax_random_key()
         if k == 0 or component_counter == 0:
             subset = block[:, :, start_value:end_value]
-            spatial_comps, decisions, _ = single_block_md(subset, key, rank_placeholder, spatial_thres, temporal_thres)
+            spatial_comps, decisions, _ = single_block_md(subset, key, rank_placeholder, temporal_avg_factor, spatial_thres, temporal_thres)
         else:
             subset = block[:, :, start_value:end_value]
             spatial_comps, decisions, _ = single_residual_block_md(subset, final_spatial_decomposition, key, rank_placeholder, spatial_thres, temporal_thres)
@@ -278,8 +286,11 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
     Returns:
         net_frames: list. Contains the starting point of the intervals (each of length "window_chunk") on which we do the decomposition.
     '''
-    assert frame_range <= total_frames
-    assert window_chunks <= frame_range
+    if frame_range > total_frames:
+        raise ValueError("Requested more frames than available")
+    if window_chunks > frame_range:
+        raise ValueError("The size of each temporal chunk is bigger than frame range")
+    
     
     num_itervals = math.ceil(frame_range / window_chunks)
     
@@ -293,7 +304,7 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
     net_frames = []
     for k in starting_points:
         curr_start = k
-        curr_end = min(k + window_chunks, total_frames-1)
+        curr_end = min(k + window_chunks, total_frames)
         
         curr_frame_list = [i for i in range(curr_start, curr_end)]
         net_frames.extend(curr_frame_list)
@@ -376,12 +387,25 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     cumulative_weights = np.zeros((data.shape[0], data.shape[1]))
     total_temporal_fit = []
     
+    temporal_avg_factor = 10
+    if temporal_avg_factor >= data.shape[2]:
+        raise ValueError("Need at least {} frames".format(temporal_avg_factor))
+    if data.shape[2] // temporal_avg_factor <= max_components:
+        string_to_disp = (
+            f"WARNING: temporal avg factor is too big, max rank per block adjusted to {data.shape[2] // temporal_avg_factor}.\n"
+            "To avoid this, initialize with more frames or reduce temporal avg factor")
+        display(string_to_disp)
+        max_components = int(data.shape[2] // temporal_avg_factor)
+    #Key: Crop temporal_basis_crop here. Long term refactor this 
+    crop_avg_constant = (data.shape[2]//temporal_avg_factor)*temporal_avg_factor
+    temporal_basis_crop = temporal_basis_crop[:, :crop_avg_constant]
+        
     for k in dim_1_iters:
         for j in dim_2_iters:
             pairs.append((k, j))
             subset = data[k:k+block_sizes[0], j:j+block_sizes[1], :].astype(dtype)
-            
-            spatial_cropped, temporal_cropped = windowed_pmd(window_chunks, subset, max_components, spatial_thres, temporal_thres, max_consec_failures)
+            subset = subset[:, :, :crop_avg_constant]
+            spatial_cropped, temporal_cropped = windowed_pmd(window_chunks, subset, max_components, spatial_thres, temporal_thres, max_consec_failures, temporal_avg_factor)
             total_temporal_fit.append(temporal_cropped)
             
             #Weight the spatial components here
@@ -418,7 +442,8 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     display("The total rank before pruning is {}".format(U_r.shape[1]))
     
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
-    U_r, P = get_projector(U_r, V_cropped)
+    # U_r, P = get_projector(U_r, V_cropped)
+    U_r, P = get_projector_noprune(U_r)
     display("After performing rank reduction, the updated rank is {}".format(P.shape[1]))
 
     ## Step 2f: Do sparse regression to get the V matrix: 
@@ -463,8 +488,30 @@ def aggregate_UV(U, V, spatial_basis, temporal_basis):
     V_net = np.concatenate([V, temporal_basis], axis = 0)
     return U_net, V_net
 
+def get_projector_noprune(U, tol=0.0001):
+    UtU = U.T.dot(U)
+    random_mat = np.eye(U.shape[1])
+    UtUR = UtU.dot(random_mat)
+    RtUtUR = np.array(jnp.matmul(random_mat.T, UtUR))
 
-def get_projector(U, V, deterministic = False):
+    eig_vecs, eig_vals, _ = jnp.linalg.svd(RtUtUR, full_matrices=False, hermitian=True)
+    eig_vals = np.array(eig_vals)
+    eig_vecs = np.array(eig_vecs)
+
+    #Now filter any remaining bad components
+    good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
+
+    #Apply the eigenvectors to random_mat
+    random_mat_e = np.array(jnp.matmul(random_mat, eig_vecs))
+
+    singular_values = np.sqrt(eig_vals) 
+
+    random_mat_e = random_mat_e / singular_values[None, :]
+
+    random_mat_e = random_mat_e[:, good_components]
+    return (U, random_mat_e)
+
+def get_projector(U, V, rank_prune_target = 3, deterministic = False):
     '''
     This function uses random projection method described in Halko to find an orthonormal subspace which approximates the 
     column span of UV. We want to express this subspace as a factorization: UP; this way we can keep the nice sparsity and avoid ever dealing with dense d x K (for any K) matrices (where d = number of pixels in movie). 
@@ -475,7 +522,6 @@ def get_projector(U, V, deterministic = False):
     Returns: 
         Tuple (U, P) (described above)
     '''
-    rank_prune_target = 3
     rank_prune_factor= rank_prune_target / 1.05
     tol = 0.0001
     keep_value = min(int(U.shape[1] / rank_prune_target), V.shape[1])
