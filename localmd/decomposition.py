@@ -315,7 +315,7 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
     return net_frames
  
 
-def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1):
+def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1, rank_prune=False):
     
     load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank, batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size, registration_routine = registration_routine)
     
@@ -357,9 +357,6 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     cumulator = []
 
     start_t = time.time()
-
-    pairs = []
-    
     cumulator_count = 0
 
     dim_1_iters = list(range(0, data.shape[0] - block_sizes[0] + 1, block_sizes[0] - overlap[0]))
@@ -404,6 +401,8 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     crop_avg_constant = (data.shape[2]//temporal_avg_factor)*temporal_avg_factor
     temporal_basis_crop = temporal_basis_crop[:, :crop_avg_constant]
         
+    
+    pairs = []
     for k in dim_1_iters:
         for j in dim_2_iters:
             pairs.append((k, j))
@@ -446,8 +445,10 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     display("The total rank before pruning is {}".format(U_r.shape[1]))
     
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
-    # U_r, P = get_projector(U_r, V_cropped)
-    U_r, P = get_projector_noprune(U_r)
+    if rank_prune:
+        U_r, P = get_projector(U_r, V_cropped)
+    else:
+        U_r, P = get_projector_noprune(U_r)
     display("After performing rank reduction, the updated rank is {}".format(P.shape[1]))
 
     ## Step 2f: Do sparse regression to get the V matrix: 
