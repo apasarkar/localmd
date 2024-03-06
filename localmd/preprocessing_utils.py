@@ -18,7 +18,9 @@ def get_mean_and_noise(movie, mean_divisor):
     noise_estimate_2d = jnp.reshape(noise_estimate_1d, (d1, d2), order="F")
     return sum_val, noise_estimate_2d
 
-    
+@partial
+def get_mean_chunk(movie, mean_divisor):
+    return jnp.sum(movie, axis = 2)/mean_divisor
 
 
 def get_noise_estimate(trace):

@@ -23,7 +23,7 @@ from jax.experimental.sparse import BCOO
 import torch
 import torch.multiprocessing as multiprocessing
 
-from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate, get_mean_and_noise
+from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate, get_mean_and_noise, get_mean_chunk
 from localmd.dataset import lazy_data_loader
 
 def display(msg):
@@ -110,7 +110,7 @@ class FrameDataloader():
 
 
 class PMDLoader():
-    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, registration_routine = None, num_samples = 8):
+    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, registration_routine = None, num_samples = 10):
         '''
         Args: 
             dataset: Object which implements the PMDDataset abstract interface. This is a basic reader which allows us to read frames of the input data. 
@@ -212,11 +212,7 @@ class PMDLoader():
         '''
         display("Computing Video Statistics")
         if self.center and self.normalize:
-            
-            if self.shape[0] > self.frame_constant * self.num_samples:
-                results = self._calculate_mean_and_normalizer_sampling()
-            else:
-                results = self._calculate_mean_and_normalizer()
+            results = self._calculate_mean_and_normalizer()
             self.mean_img = results[0]
             self.std_img = results[1]
         else:
@@ -305,10 +301,9 @@ class PMDLoader():
             elts_used = list(range(0, self.shape[0] - self.frame_constant, self.frame_constant))
             elts_used.append(self.shape[0] - self.frame_constant)
         elts_used = list(range(0, self.shape[0], self.frame_constant))
-        if elts_used[-1] > self.shape[0] - self.frame_constant and elts_used[-1] > 0:
-            elts_used[-1] = self.shape[0] - self.frame_constant
         
-
+        min_allowed_frames = 256 #Without this, you can't do noise estimation
+        elts_for_var_est = 0
         for i in elts_used:
             start_pt_frame = i
             end_pt_frame = min(i + self.frame_constant, self.shape[0])
@@ -317,15 +312,23 @@ class PMDLoader():
             data = np.array(data) 
             mean_value_net = np.zeros((self.shape[1], self.shape[2]))
             normalizer_net = np.zeros((self.shape[1], self.shape[2]))
+            if data.shape[2] >= min_allowed_frames:
+                elts_for_var_est += 1
             for step1 in dim1_range_start_pts:
                 for step2 in dim2_range_start_pts:
                     crop_data = data[step1:step1+divisor, step2:step2+divisor, :]
-                    mean_value, noise_est_2d = get_mean_and_noise(crop_data, crop_data.shape[2])
-                    mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
-                    normalizer_net[step1:step1+divisor, step2:step2+divisor] = np.array(noise_est_2d)
+                    if crop_data.shape[2] >= min_allowed_frames:
+                        mean_value, noise_est_2d = get_mean_and_noise(crop_data, self.shape[0])
+                        mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
+                        normalizer_net[step1:step1+divisor, step2:step2+divisor] = np.array(noise_est_2d)
+                    else:
+                        mean_value = get_mean_chunk(crop_data, self.shape[0])
+                        mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
                     
-            overall_mean += (mean_value_net/len(elts_used))
+            overall_mean += mean_value_net
             overall_normalizer += (normalizer_net/len(elts_used))
+        if elts_for_var_est != 0:
+            overall_normalizer *= (len(elts_used)/elts_for_var_est)
         overall_normalizer[overall_normalizer==0] = 1
         display("Finished mean and noise variance")
         return overall_mean.astype(self.dtype), overall_normalizer
