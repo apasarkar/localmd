@@ -14,8 +14,8 @@ def construct_rank_data(rank, dims=(150, 150)):
     return output.transpose(2, 0, 1)
 class TestCompression:
 
-    def setup_method(self):
-        self.dataset = construct_rank_data(30)
+    def setup_method(self, rank=30, dims=(150, 150)):
+        self.dataset = construct_rank_data(rank, dims=dims)
         self.pmd_params_dict = pmd_params_dict = {
                                     'block_height':32,
                                     'block_width':32,
@@ -27,11 +27,12 @@ class TestCompression:
                                 }
 
 
-    @pytest.mark.parametrize("blocks", [(32, 32), (28, 28), (40, 40)])
-    def test_decomposition_blocks(self, blocks):
+    @pytest.mark.parametrize("block0", [32, 28, 40])
+    @pytest.mark.parametrize("block1", [32, 28, 40])
+    def test_decomposition_blocks(self, block0, block1):
 
-        block_height = blocks[0]
-        block_width = blocks[1]
+        block_height = block0
+        block_width = block1
 
         block_sizes = [block_height, block_width]
 
@@ -59,6 +60,7 @@ class TestCompression:
                                               num_workers=0, registration_routine=registration_routine,
                                               max_consec_failures=max_consec_failures,
                                               rank_prune=rank_prune)
+
 
     def teardown_method(self):
         pass
