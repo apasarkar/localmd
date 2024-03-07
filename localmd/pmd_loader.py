@@ -128,7 +128,6 @@ class PMDLoader():
         self.dataset = dataset
         self.dtype = dtype
         
-        assert isinstance(dataset, lazy_data_loader), "Dataset object does not conform to lazy_data_loader API requirements" 
         self.shape = self.dataset.shape
         self._estimate_batch_size(frame_const=batch_size)
         self.pixel_batch_size=pixel_batch_size
