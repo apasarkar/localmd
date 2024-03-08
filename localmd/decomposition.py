@@ -365,7 +365,8 @@ def check_fov_size(fov_dims: tuple, min_allowed_value: int=10) -> None:
         if k < min_allowed_value:
             raise ValueError("At least one FOV dimension is lower than {}, "
                              "too small to process".format(min_allowed_value))
-def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1, rank_prune=False):
+            
+def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1, rank_prune=False, temporal_avg_factor=10):
 
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank, batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size, registration_routine = registration_routine)
@@ -440,7 +441,6 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
     cumulative_weights = np.zeros((data.shape[0], data.shape[1]))
     total_temporal_fit = []
     
-    temporal_avg_factor = 10
     if temporal_avg_factor >= data.shape[2]:
         raise ValueError("Need at least {} frames".format(temporal_avg_factor))
     if data.shape[2] // temporal_avg_factor <= max_components:
