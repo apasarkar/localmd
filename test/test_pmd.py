@@ -1,9 +1,5 @@
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pytest
-import tifffile
 
 from localmd.decomposition import localmd_decomposition
 
