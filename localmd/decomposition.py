@@ -313,7 +313,36 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
         curr_frame_list = [i for i in range(curr_start, curr_end)]
         net_frames.extend(curr_frame_list)
     return net_frames
- 
+
+def update_blocksizes(blocks, fov_shape, min_block_value = 10):
+    """
+    If user specifies block sizes that are too large, this approach truncates the blocksizes appropriately
+
+    Args:
+        blocks:
+        fov_shape:
+
+    Returns:
+
+    """
+    if blocks[0] < min_block_value or blocks[1] < min_block_value:
+        raise ValueError("One of the block dimensions was less than 2, set to a larger value")
+    final_blocks = []
+    if blocks[0] > fov_shape[0]:
+        display("Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
+            blocks[0], fov_shape[0], fov_shape[0]
+        ))
+        final_blocks.append(fov_shape[0])
+    else:
+        final_blocks.append(blocks[0])
+    if blocks[1] > fov_shape[1]:
+        display("Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
+            blocks[1], fov_shape[1], fov_shape[1]
+        ))
+        final_blocks.append(fov_shape[1])
+    else:
+        final_blocks.append(blocks[1])
+    return final_blocks
 
 def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1, rank_prune=False):
     
@@ -338,7 +367,7 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
         frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
         
-    block_sizes = block_sizes
+    block_sizes = update_blocksizes(block_sizes, (dataset_obj.shape[1], dataset_obj.shape[2]))
     overlap = [math.ceil(block_sizes[0] / 2), math.ceil(block_sizes[1] / 2)]
     
     ##Get the spatial and temporal thresholds
