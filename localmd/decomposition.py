@@ -314,19 +314,24 @@ def identify_window_chunks(frame_range, total_frames, window_chunks):
         net_frames.extend(curr_frame_list)
     return net_frames
 
-def update_blocksizes(blocks, fov_shape, min_block_value = 10):
+def update_blocksizes(blocks: tuple, fov_shape: tuple, min_block_value: int=10) -> tuple:
     """
     If user specifies block sizes that are too large, this approach truncates the blocksizes appropriately
 
     Args:
-        blocks:
-        fov_shape:
+        blocks (tuple): Two integers, specifying the height and width blocksizes used in compression
+        fov_shape (tuple): The height and width of the FOV
+        min_block_value (int): The minimum value of a block in either spatial dimension.
 
     Returns:
+        None
 
+    Raises:
+        ValueError if either block dimension is less than min allowed value.
     """
     if blocks[0] < min_block_value or blocks[1] < min_block_value:
-        raise ValueError("One of the block dimensions was less than 2, set to a larger value")
+        raise ValueError("One of the block dimensions was less than min allowed value of {}, "
+                         "set to a larger value".format(min_block_value))
     final_blocks = []
     if blocks[0] > fov_shape[0]:
         display("Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
@@ -344,8 +349,25 @@ def update_blocksizes(blocks, fov_shape, min_block_value = 10):
         final_blocks.append(blocks[1])
     return final_blocks
 
+def check_fov_size(fov_dims: tuple, min_allowed_value: int=10) -> None:
+    """
+    Checks if the FOV dimensions are too small
+    Args:
+        fov_dims (tuple). Two integers specifying the FOV dimensions.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError if either field of view dim is less than the minimum allowed value.
+    """
+    for k in fov_dims:
+        if k < min_allowed_value:
+            raise ValueError("At least one FOV dimension is lower than {}, "
+                             "too small to process".format(min_allowed_value))
 def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5, batching=10, frame_batch_size = 10000, dtype='float32', num_workers=0, pixel_batch_size=5000, registration_routine = None, max_consec_failures = 1, rank_prune=False):
-    
+
+    check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank, batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size, registration_routine = registration_routine)
     
     #Decide which chunks of the data you will use for the spatial PMD blockwise fits
@@ -366,7 +388,8 @@ def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=
             window_chunks = frame_range
         frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
-        
+
+
     block_sizes = update_blocksizes(block_sizes, (dataset_obj.shape[1], dataset_obj.shape[2]))
     overlap = [math.ceil(block_sizes[0] / 2), math.ceil(block_sizes[1] / 2)]
     
