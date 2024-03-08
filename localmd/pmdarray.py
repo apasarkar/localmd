@@ -4,6 +4,7 @@ import scipy.sparse
 from typing import *
 from scipy.sparse import csr_matrix
 
+
 class PMDArray():
     def __init__(self, U: scipy.sparse.coo_matrix, R: np.ndarray, s: np.ndarray,
                  V: np.ndarray, data_shape: tuple[int, int, int], data_order: str, mean_img: np.ndarray,
@@ -40,11 +41,11 @@ class PMDArray():
         self.R = R
         self.s = s
         self.V = V
-        self._RsV = (R * s[None, :]).dot(V) #Fewer computations when doing __getitem__
+        self._RsV = (R * s[None, :]).dot(V)  # Fewer computations when doing __getitem__
         self.mean_img = mean_img
         self.var_img = std_img
-        self.row_indices = np.arange(self.d1*self.d2).reshape((self.d1, self.d2), order=self.order)
-    
+        self.row_indices = np.arange(self.d1 * self.d2).reshape((self.d1, self.d2), order=self.order)
+
     @property
     def dtype(self):
         """Data type of the array elements."""
@@ -61,13 +62,14 @@ class PMDArray():
         else:
             return elt
 
-    def spatial_crop(self, key) -> tuple[scipy.sparse.csr_matrix, tuple]:
+    def spatial_crop(self, key) -> tuple[scipy.sparse.csr_matrix, np.ndarray, np.ndarray, tuple]:
         """
 
         Args:
             key (tuple): Length 2 tuple used to slice the rows of the data
         Returns:
             U_used (scipy.sparse.csr_matrix). Cropped sparse spatial matrix
+            mean_used (np.ndarray):
             implied_fov (tuple). Tuple of integer(s) specifying the implied FOV dimensions
         """
         if key[0] is None or key[1] is None:
@@ -75,9 +77,11 @@ class PMDArray():
 
         key = (self._parse_int_to_list(key[0]), self._parse_int_to_list(key[1]))
         used_rows = self.row_indices[key[0], key[1]]
+        mean_used = self.mean_img[key[0], key[1]]
+        var_used = self.var_img[key[0], key[1]]
         u_used = self.U_sparse[used_rows.reshape((-1,), order=self.order)]
         implied_fov_shape = used_rows.shape
-        return u_used, implied_fov_shape
+        return u_used, mean_used, var_used, implied_fov_shape
 
     def temporal_crop(self, key: Union[np.ndarray, list, int]) -> np.ndarray:
         """
@@ -90,9 +94,7 @@ class PMDArray():
         if key is None:
             raise ValueError("Cannot use None for indexing")
 
-
         return self._RsV[:, self._parse_int_to_list(key)]
-
 
     def __getitem__(self, key) -> np.ndarray:
         """Returns self[key]. Does NOT support dimension expansion."""
@@ -103,21 +105,25 @@ class PMDArray():
             key = (key,)
 
         if len(key) == 1:
-            spatial, implied_fov_dims = self.spatial_crop((slice(None, None, None), slice(None, None, None)))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(
+                (slice(None, None, None), slice(None, None, None)))
             temporal = self.temporal_crop(key[0])
         elif len(key) == 2:
-            spatial, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
             temporal = self.temporal_crop(key[0])
         elif len(key) == 3:
-            spatial, implied_fov_dims = self.spatial_crop((key[1], key[2]))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop((key[1], key[2]))
             temporal = self.temporal_crop(key[0])
         else:
             raise ValueError("Too many values to unpack in __getitem__")
 
+        # Get the unnormalized outputs
         output = spatial.dot(temporal)
-        output = output.reshape(implied_fov_dims + (-1,), order=self.order)
+        output = (output.reshape(implied_fov_dims + (-1,), order=self.order) *
+                  np.expand_dims(var_used, axis=len(var_used.shape)) +
+                  np.expand_dims(mean_used, axis=len(mean_used.shape)))
 
-        #Return with the frames as the first dimension
+        # Return with the frames as the first dimension
         output = np.transpose(output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1)))
 
         return output.squeeze().astype(self.dtype)

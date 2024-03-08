@@ -23,8 +23,8 @@ from jax.experimental.sparse import BCOO
 import torch
 import torch.multiprocessing as multiprocessing
 
-from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate, get_mean_and_noise
-from localmd.dataset import PMDDataset
+from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate, get_mean_and_noise, get_mean_chunk
+from localmd.dataset import lazy_data_loader
 
 def display(msg):
     """
@@ -67,7 +67,7 @@ def truncated_random_svd(input_matrix, key, rank, num_oversamples=10):
 class FrameDataloader():
     def __init__(self, dataset, batch_size, registration_routine=None, dtype="float32"):
         self.dataset = dataset
-        self.chunks = math.ceil(self.shape[2]/batch_size)
+        self.chunks = math.ceil(self.shape[0]/batch_size)
         self.batch_size = batch_size
         self.registration_routine = registration_routine
         self.dtype=dtype
@@ -89,27 +89,28 @@ class FrameDataloader():
         start = index * self.batch_size
         
         if index == max(0, self.chunks - 2):
-            end = self.shape[2]
+            end = self.shape[0]
             #load rest of data here
             keys = [i for i in range(start, end)]
-            data = self.dataset.get_frames(keys).astype(self.dtype)
+            data = self.dataset[keys].astype(self.dtype)
         elif index < self.chunks - 2:
             end = start + self.batch_size
             keys = [i for i in range(start, end)]
-            data = self.dataset.get_frames(keys).astype(self.dtype)
+            data = self.dataset[keys].astype(self.dtype)
         else:
             raise ValueError
+            
         if self.registration_routine is not None:
-            data = self.registration_routine(data.transpose(2, 0, 1)).transpose(1, 2, 0)
-        else:
-            data = data
-        return data
+            data = self.registration_routine(data)
+        
+        #Data is shape (T, d1, d2), need to return (d1, d2, T)
+        return data.transpose(1, 2, 0)
     
 
 
 
 class PMDLoader():
-    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, registration_routine = None, num_samples = 8):
+    def __init__(self, dataset, dtype='float32', center=True, normalize=True, background_rank=15, batch_size=2000, num_workers = None, pixel_batch_size=5000, registration_routine = None, num_samples = 10):
         '''
         Args: 
             dataset: Object which implements the PMDDataset abstract interface. This is a basic reader which allows us to read frames of the input data. 
@@ -127,7 +128,6 @@ class PMDLoader():
         self.dataset = dataset
         self.dtype = dtype
         
-        assert isinstance(dataset, PMDDataset), "Dataset object does not conform to PMDDataset API requirements" 
         self.shape = self.dataset.shape
         self._estimate_batch_size(frame_const=batch_size)
         self.pixel_batch_size=pixel_batch_size
@@ -165,7 +165,7 @@ class PMDLoader():
         return val/(1024**3)
     
     def _estimate_batch_size_heuristic(self, desired_size_in_GB=50, num_frames_to_sim=10):
-        test = np.zeros((self.shape[0], self.shape[1], num_frames_to_sim), dtype=self.dtype)
+        test = np.zeros((self.shape[1], self.shape[2], num_frames_to_sim), dtype=self.dtype)
         gb_size = self._get_size_in_GB(test)
         
         multiplier = math.ceil(desired_size_in_GB/gb_size)
@@ -197,11 +197,11 @@ class PMDLoader():
                 start_point = k
                 end_point = min(k + self.batch_size, frame_length)
                 curr_frames = frames[start_point:end_point]
-                x = self.dataset.get_frames(curr_frames).astype(self.dtype).transpose(2,0,1)
+                x = self.dataset[curr_frames]
                 result[:, :, start_point:end_point] = np.array(self.registration_routine(x)).transpose(1,2,0)
             return result
         else:
-            return self.dataset.get_frames(frames).astype(self.dtype)
+            return self.dataset[frames].astype(self.dtype).transpose(1, 2, 0)
 
         
         
@@ -211,11 +211,7 @@ class PMDLoader():
         '''
         display("Computing Video Statistics")
         if self.center and self.normalize:
-            
-            if self.shape[2] > self.frame_constant * self.num_samples:
-                results = self._calculate_mean_and_normalizer_sampling()
-            else:
-                results = self._calculate_mean_and_normalizer()
+            results = self._calculate_mean_and_normalizer()
             self.mean_img = results[0]
             self.std_img = results[1]
         else:
@@ -230,41 +226,41 @@ class PMDLoader():
         This function uses sampling procedures to accurately estimate the noise variance and mean of every pixel of the dataset
         '''
         display("Calculating mean and noise variance via sampling")
-        overall_mean = np.zeros((self.shape[0], self.shape[1]))
-        overall_normalizer = np.zeros((self.shape[0], self.shape[1]), dtype=self.dtype)
-        num_frames = self.shape[2]
+        overall_mean = np.zeros((self.shape[1], self.shape[2]))
+        overall_normalizer = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
+        num_frames = self.shape[0]
         
         divisor = math.ceil(math.sqrt(self.pixel_batch_size))
         if self.shape[0] - divisor <= 0:
             dim1_range_start_pts = np.arange(1)
         else:
-            dim1_range_start_pts = np.arange(0, self.shape[0] - divisor, divisor)
-            dim1_range_start_pts = np.concatenate([dim1_range_start_pts, [self.shape[0] - divisor]], axis = 0)
-        if self.shape[1] - divisor <= 0:
+            dim1_range_start_pts = np.arange(0, self.shape[1] - divisor, divisor)
+            dim1_range_start_pts = np.concatenate([dim1_range_start_pts, [self.shape[1] - divisor]], axis = 0)
+        if self.shape[2] - divisor <= 0:
             dim2_range_start_pts = np.arange(1)
         else:
-            dim2_range_start_pts = np.arange(0, self.shape[1] - divisor, divisor)
-            dim2_range_start_pts = np.concatenate([dim2_range_start_pts, [self.shape[1] - divisor]], axis = 0)
+            dim2_range_start_pts = np.arange(0, self.shape[2] - divisor, divisor)
+            dim2_range_start_pts = np.concatenate([dim2_range_start_pts, [self.shape[2] - divisor]], axis = 0)
         
-        if self.shape[2] - self.frame_constant <= 0:
+        if self.shape[0] - self.frame_constant <= 0:
             elts_to_sample = [0]
         else:
-            elts_to_sample = list(range(0, self.shape[2] - self.frame_constant, self.frame_constant))
-            elts_to_sample.append(self.shape[2] - self.frame_constant)
+            elts_to_sample = list(range(0, self.shape[0] - self.frame_constant, self.frame_constant))
+            elts_to_sample.append(self.shape[0] - self.frame_constant)
         elts_used = np.random.choice(elts_to_sample, min(self.num_samples, len(elts_to_sample)), replace=False)
         frames_actually_used = 0
         for i in elts_used:
             start_pt_frame = i
-            end_pt_frame = min(i + self.frame_constant, self.shape[2])
+            end_pt_frame = min(i + self.frame_constant, self.shape[0])
             frames_actually_used += end_pt_frame - start_pt_frame
             
             data = np.array(self.temporal_crop([i for i in range(start_pt_frame, end_pt_frame)]))
-            mean_value_net = np.zeros((self.shape[0], self.shape[1]))
-            normalizer_net = np.zeros((self.shape[0], self.shape[1]))
+            mean_value_net = np.zeros((self.shape[1], self.shape[2]))
+            normalizer_net = np.zeros((self.shape[1], self.shape[2]))
             for step1 in dim1_range_start_pts:
                 for step2 in dim2_range_start_pts:
                     crop_data = data[step1:step1+divisor, step2:step2+divisor, :]
-                    mean_value, noise_est_2d = get_mean_and_noise(crop_data, crop_data.shape[2])
+                    mean_value, noise_est_2d = get_mean_and_noise(crop_data, crop_data.shape[0])
                     mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
                     normalizer_net[step1:step1+divisor, step2:step2+divisor] = np.array(noise_est_2d)
                     
@@ -281,50 +277,57 @@ class PMDLoader():
         same time
         '''
         display("Calculating mean and noise variance")
-        overall_mean = np.zeros((self.shape[0], self.shape[1]))
-        overall_normalizer = np.zeros((self.shape[0], self.shape[1]), dtype=self.dtype)
-        num_frames = self.shape[2]
+        overall_mean = np.zeros((self.shape[1], self.shape[2]))
+        overall_normalizer = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
+        num_frames = self.shape[0]
         
         divisor = math.ceil(math.sqrt(self.pixel_batch_size))
-        if self.shape[0] - divisor <= 0:
+        if self.shape[1] - divisor <= 0:
             dim1_range_start_pts = np.arange(1) 
         else:
-            dim1_range_start_pts = np.arange(0, self.shape[0] - divisor, divisor)
-            dim1_range_start_pts = np.concatenate([dim1_range_start_pts, [self.shape[0] - divisor]], axis = 0)
+            dim1_range_start_pts = np.arange(0, self.shape[1] - divisor, divisor)
+            dim1_range_start_pts = np.concatenate([dim1_range_start_pts, [self.shape[1] - divisor]], axis = 0)
         
-        if self.shape[1] - divisor <= 0:
+        if self.shape[2] - divisor <= 0:
             dim2_range_start_pts = np.arange(1)
         else:
-            dim2_range_start_pts = np.arange(0, self.shape[1] - divisor, divisor)
-            dim2_range_start_pts = np.concatenate([dim2_range_start_pts, [self.shape[1] - divisor]], axis = 0)
+            dim2_range_start_pts = np.arange(0, self.shape[2] - divisor, divisor)
+            dim2_range_start_pts = np.concatenate([dim2_range_start_pts, [self.shape[2] - divisor]], axis = 0)
         
-        if self.shape[2] - self.frame_constant <= 0:
+        if self.shape[0] - self.frame_constant <= 0:
             elts_used = [0]
         else:
-            elts_used = list(range(0, self.shape[2] - self.frame_constant, self.frame_constant))
-            elts_used.append(self.shape[2] - self.frame_constant)
-        elts_used = list(range(0, self.shape[2], self.frame_constant))
-        if elts_used[-1] > self.shape[2] - self.frame_constant and elts_used[-1] > 0:
-            elts_used[-1] = self.shape[2] - self.frame_constant
+            elts_used = list(range(0, self.shape[0] - self.frame_constant, self.frame_constant))
+            elts_used.append(self.shape[0] - self.frame_constant)
+        elts_used = list(range(0, self.shape[0], self.frame_constant))
         
-
+        min_allowed_frames = 256 #Without this, you can't do noise estimation
+        elts_for_var_est = 0
         for i in elts_used:
             start_pt_frame = i
-            end_pt_frame = min(i + self.frame_constant, self.shape[2])
+            end_pt_frame = min(i + self.frame_constant, self.shape[0])
             data = np.array(self.temporal_crop([i for i in range(start_pt_frame, end_pt_frame)]))
 
             data = np.array(data) 
-            mean_value_net = np.zeros((self.shape[0], self.shape[1]))
-            normalizer_net = np.zeros((self.shape[0], self.shape[1]))
+            mean_value_net = np.zeros((self.shape[1], self.shape[2]))
+            normalizer_net = np.zeros((self.shape[1], self.shape[2]))
+            if data.shape[2] >= min_allowed_frames:
+                elts_for_var_est += 1
             for step1 in dim1_range_start_pts:
                 for step2 in dim2_range_start_pts:
                     crop_data = data[step1:step1+divisor, step2:step2+divisor, :]
-                    mean_value, noise_est_2d = get_mean_and_noise(crop_data, crop_data.shape[2])
-                    mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
-                    normalizer_net[step1:step1+divisor, step2:step2+divisor] = np.array(noise_est_2d)
+                    if crop_data.shape[2] >= min_allowed_frames:
+                        mean_value, noise_est_2d = get_mean_and_noise(crop_data, self.shape[0])
+                        mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
+                        normalizer_net[step1:step1+divisor, step2:step2+divisor] = np.array(noise_est_2d)
+                    else:
+                        mean_value = get_mean_chunk(crop_data, self.shape[0])
+                        mean_value_net[step1:step1+divisor, step2:step2+divisor] = np.array(mean_value)
                     
-            overall_mean += (mean_value_net/len(elts_used))
+            overall_mean += mean_value_net
             overall_normalizer += (normalizer_net/len(elts_used))
+        if elts_for_var_est != 0:
+            overall_normalizer *= (len(elts_used)/elts_for_var_est)
         overall_normalizer[overall_normalizer==0] = 1
         display("Finished mean and noise variance")
         return overall_mean.astype(self.dtype), overall_normalizer
@@ -338,9 +341,9 @@ class PMDLoader():
 
     def _calculate_background_filter(self, n_samples = 1000):
         if self.background_rank <= 0:
-            return np.zeros((self.shape[0]*self.shape[1], 1)).astype(self.dtype)
-        sample_list = [i for i in range(0, self.shape[2])]
-        random_data = np.random.choice(sample_list,replace=False, size=min(n_samples, self.shape[2]))
+            return np.zeros((self.shape[1]*self.shape[2], 1)).astype(self.dtype)
+        sample_list = [i for i in range(0, self.shape[0])]
+        random_data = np.random.choice(sample_list,replace=False, size=min(n_samples, self.shape[0])).tolist()
         crop_data = self.temporal_crop_standardized(random_data)
         key = make_jax_random_key()
         spatial_basis, _ = truncated_random_svd(crop_data.reshape((-1, crop_data.shape[-1]), order=self.order), key, self.background_rank)
@@ -369,7 +372,7 @@ class PMDLoader():
             sparse_projection_term = BCOO.from_scipy_sparse(M[0])
             inv_term = M[1]
 
-            result = np.zeros((inv_term.shape[0], self.shape[2]), dtype=self.dtype)
+            result = np.zeros((inv_term.shape[0], self.shape[0]), dtype=self.dtype)
             mean_img_r = self.mean_img.reshape((-1, 1), order=self.order)
             std_img_r = self.std_img.reshape((-1, 1), order=self.order)
             start = 0
@@ -403,7 +406,7 @@ class PMDLoader():
                 output = full_V_projection_routine(self.order, registration_method, inv_term, sparse_projection_term, data, mean_img_r, std_img_r)
                 num_frames_chunk = output.shape[1]
 
-                endpt = min(self.shape[2], start+num_frames_chunk)
+                endpt = min(self.shape[0], start+num_frames_chunk)
                 result_list.append(output)
                 start = endpt
             result = np.array(jnp.concatenate(result_list, axis = 1))
@@ -413,7 +416,7 @@ class PMDLoader():
     ##TODO: Compose all operations so this pipeline executes end-to-end on accelerator
     def temporal_crop_with_filter(self, frames):
         crop_data = self.temporal_crop(frames)
-        spatial_basis_r = self.spatial_basis.reshape((self.shape[0], self.shape[1], -1), order = self.order)
+        spatial_basis_r = self.spatial_basis.reshape((self.shape[1], self.shape[2], -1), order = self.order)
         
         output_matrix = np.zeros((crop_data.shape[0], crop_data.shape[1], crop_data.shape[2]))
         temporal_basis = np.zeros((spatial_basis_r.shape[2], crop_data.shape[2]))
