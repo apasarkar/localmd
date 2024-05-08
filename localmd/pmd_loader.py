@@ -25,6 +25,7 @@ import torch.multiprocessing as multiprocessing
 
 from localmd.preprocessing_utils import get_noise_estimate_vmap, center_and_get_noise_estimate, get_mean_and_noise, get_mean_chunk
 from localmd.dataset import lazy_data_loader
+from typing import *
 
 def display(msg):
     """
@@ -80,7 +81,7 @@ class FrameDataloader():
     def shape(self):
         return self.dataset.shape
     
-    def __getitem__(self, index):
+    def __getitem__(self, index: int):
         '''
         This function takes as input an index which describes a "chunk" (of length roughly self.batch_size) of frames to be loaded. It returns a np.ndarray of shape: 
         (d1, d2, frames), where (d1, d2) are the FOV dimensions of the data and frames is the number of frames in the chunk. 
