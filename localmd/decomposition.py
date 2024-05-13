@@ -743,3 +743,7 @@ def right_smaller_svd_routine(P, V):
     
     Left = jnp.matmul(V, jnp.divide(Right_T, jnp.expand_dims(divisor, axis=0)))
     PL = jnp.matmul(P, Left)
+
+    return PL, singular, Right_T.transpose()
+
+    

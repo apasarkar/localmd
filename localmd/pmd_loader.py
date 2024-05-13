@@ -189,7 +189,7 @@ class PMDLoader():
         '''
         if self.registration_routine is not None:
             frame_length = len(frames) 
-            result = np.zeros((self.shape[0], self.shape[1], frame_length))
+            result = np.zeros((frame_length, self.shape[1], self.shape[2]))
             
             value_points = list(range(0, frame_length, self.batch_size))
             if value_points[-1] > frame_length - self.batch_size and frame_length > self.batch_size:
@@ -199,8 +199,10 @@ class PMDLoader():
                 end_point = min(k + self.batch_size, frame_length)
                 curr_frames = frames[start_point:end_point]
                 x = self.dataset[curr_frames]
-                result[:, :, start_point:end_point] = np.array(self.registration_routine(x)).transpose(1,2,0)
-            return result
+                if len(x.shape) == len(self.shape) - 1:
+                    x = x[None, :, :]
+                result[start_point:end_point, :, :] = np.array(self.registration_routine(x))
+            return result.transpose(1, 2, 0)
         else:
             return self.dataset[frames].astype(self.dtype).transpose(1, 2, 0)
 
