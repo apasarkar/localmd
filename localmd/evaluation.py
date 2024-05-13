@@ -2,19 +2,21 @@ import jax
 import jax.scipy
 import jax.numpy as jnp
 from jax import vmap
+from jax import Array
+from jax.typing import ArrayLike
 from typing import *
 import numpy as np
 
 
-def l1_norm(data: jnp.ndarray) -> jnp.ndarray:
+def l1_norm(data: ArrayLike) -> Array:
     """
     Calculates the overall L1 norm of the data.
 
     Args:
-        data (jnp.ndarray): The input data of any shape.
+        data (ArrayLike): The input data of any shape.
 
     Returns:
-        (jnp.ndarray): The L1 norm of the input data.
+        (Array): The L1 norm of the input data.
     """
 
     data = jnp.abs(data)
@@ -22,17 +24,17 @@ def l1_norm(data: jnp.ndarray) -> jnp.ndarray:
     return norm
 
 
-def trend_filter_stat(trace: jnp.ndarray) -> jnp.ndarray:
+def trend_filter_stat(trace: ArrayLike) -> Array:
     """
     Applies a trend filter to a 1D time series dataset.
 
     Key assumption: Data has a length of at least 3.
 
     Args:
-        trace (jnp.ndarray): The input time series data with shape (T,).
+        trace (ArrayLike): The input time series data with shape (T,).
 
     Returns:
-        (jnp.ndarray): The single value representing the trend filter statistic.
+        (Array): The single value representing the trend filter statistic.
     """
     left_side = jax.lax.dynamic_slice(trace, (0,), (trace.shape[0] - 2,))
     right_side = jax.lax.dynamic_slice(trace, (2,), (trace.shape[0] - 2,))
@@ -43,17 +45,17 @@ def trend_filter_stat(trace: jnp.ndarray) -> jnp.ndarray:
     return jnp.sum(combined_mat)
 
 
-def total_variation_stat(img: jnp.ndarray) -> jnp.ndarray:
+def total_variation_stat(img: ArrayLike) -> Array:
     """
     Applies a total variation filter to a 2D image.
 
     Key assumption: The image has a size of at least 3 x 3 pixels.
 
     Args:
-        img (jnp.ndarray): The input image with shape (x, y).
+        img (ArrayLike): The input image with shape (x, y).
 
     Returns:
-        (jnp.ndarray): The total variation statistic for the input image.
+        (Array): The total variation statistic for the input image.
     """
     center = jax.lax.dynamic_slice(img, (1, 1),
                                    (img.shape[0] - 2, img.shape[1] - 2))
@@ -88,15 +90,15 @@ def total_variation_stat(img: jnp.ndarray) -> jnp.ndarray:
     return jnp.sum(accumulator)
 
 
-def spatial_roughness_stat(u: jnp.ndarray) -> jnp.ndarray:
+def spatial_roughness_stat(u: ArrayLike) -> Array:
     """
     Computes a spatial roughness statistic for the input data
 
     Args:
-        u (jnp.ndarray): Image of dimensions (d1, d2)
+        u (ArrayLike): Image of dimensions (d1, d2)
 
     Returns:
-        (jnp.ndarray): The computed spatial roughness statistic
+        (Array): The computed spatial roughness statistic
     """
 
     lower_vert = jax.lax.dynamic_slice(u, (1, 0), (u.shape[0] - 1, u.shape[1]))
@@ -104,24 +106,24 @@ def spatial_roughness_stat(u: jnp.ndarray) -> jnp.ndarray:
 
     vert_diffs = jnp.abs(lower_vert - upper_vert)
 
-    left_horz = jax.lax.dynamic_slice(u, (0, 0), (u.shape[0], u.shape[1] - 1))
-    right_horz = jax.lax.dynamic_slice(u, (0, 1), (u.shape[0], u.shape[1] - 1))
+    left_horizontal = jax.lax.dynamic_slice(u, (0, 0), (u.shape[0], u.shape[1] - 1))
+    right_horizontal = jax.lax.dynamic_slice(u, (0, 1), (u.shape[0], u.shape[1] - 1))
 
-    horz_diffs = jnp.abs(left_horz - right_horz)
-    avg_diff = (jnp.sum(vert_diffs) + jnp.sum(horz_diffs)) / (
-            vert_diffs.shape[0] * vert_diffs.shape[1] + horz_diffs.shape[0] * horz_diffs.shape[1])
+    horizontal_difference = jnp.abs(left_horizontal - right_horizontal)
+    avg_diff = (jnp.sum(vert_diffs) + jnp.sum(horizontal_difference)) / (
+            vert_diffs.shape[0] * vert_diffs.shape[1] + horizontal_difference.shape[0] * horizontal_difference.shape[1])
 
     avg_elem = jnp.mean(jnp.abs(u))
 
     return avg_diff / avg_elem
 
 
-def temporal_roughness_stat(v: jnp.ndarray) -> jnp.ndarray:
+def temporal_roughness_stat(v: ArrayLike) -> Array:
     """
     Args:
-        v (jnp.ndarray): Input data of shape
+        v (ArrayLike): Input data of shape
     Returns:
-        (jnp.ndarray): The computed temporal roughness statistic
+        (Array): The computed temporal roughness statistic
     """
 
     v_left = jax.lax.dynamic_slice(v, (0,), (v.shape[0] - 2,))
@@ -135,21 +137,21 @@ spatial_roughness_stat_vmap = vmap(spatial_roughness_stat, in_axes=(2))
 temporal_roughness_stat_vmap = vmap(temporal_roughness_stat, in_axes=(0))
 
 
-def evaluate_fitness(img: jnp.ndarray, trace: jnp.ndarray, spatial_threshold: Union[float, jnp.ndarray],
-                     temporal_threshold: Union[float, jnp.ndarray]) -> jnp.ndarray:
+def evaluate_fitness(img: ArrayLike, trace: ArrayLike, spatial_threshold: Union[float, ArrayLike],
+                     temporal_threshold: Union[float, ArrayLike]) -> Array:
     """
     Evaluates the fitness of an image-trace pair based on spatial and temporal thresholds.
 
     Args:
-        img (jnp.ndarray): The input image.
-        trace (jnp.ndarray): The input trace data.
-        spatial_threshold (Union[float, jnp.ndarray]): The threshold for spatial roughness.
-            Can be a single float or jnp.ndarray value
-        temporal_threshold (Union[float, jnp.ndarray]): The threshold for temporal roughness.
+        img (ArrayLike): The input image.
+        trace (ArrayLike): The input trace data.
+        spatial_threshold (Union[float, ArrayLike]): The threshold for spatial roughness.
+            Can be a single float or ArrayLike value
+        temporal_threshold (Union[float, ArrayLike]): The threshold for temporal roughness.
             Can be a single float or jnp.ndarray value
 
     Returns:
-        jnp.ndarray: Output with dtype (int32) indicating the fitness evaluation. Returns 1 if both spatial and temporal
+        Array: Output with dtype (int32) indicating the fitness evaluation. Returns 1 if both spatial and temporal
             conditions are met, otherwise returns 0.
     """
     spatial_stat = spatial_roughness_stat(img)
@@ -165,22 +167,22 @@ def evaluate_fitness(img: jnp.ndarray, trace: jnp.ndarray, spatial_threshold: Un
 evaluate_fitness_vmap = vmap(evaluate_fitness, in_axes=(2, 1, None, None))
 
 
-def construct_final_fitness_decision(images: jnp.ndarray,
-                                     traces: jnp.ndarray, spatial_threshold: Union[float, jnp.ndarray],
-                                     temporal_threshold: Union[float, jnp.ndarray]) -> jnp.ndarray:
+def construct_final_fitness_decision(images: ArrayLike,
+                                     traces: ArrayLike, spatial_threshold: Union[float, ArrayLike],
+                                     temporal_threshold: Union[float, ArrayLike]) -> Array:
     """
     Constructs the final fitness decision for a batch of image-trace pairs based on spatial and temporal thresholds.
 
     Args:
-        images (jnp.ndarray): An array containing input images.
-        traces (jnp.ndarray): An array containing input trace data.
-        spatial_threshold (Union[float, jnp.ndarray]): The threshold(s) for spatial roughness.
-            Can be a single float or jnp.ndarray value.
-        temporal_threshold (Union[float, jnp.ndarray]): The threshold(s) for temporal roughness.
-            Can be a single float or jnp.ndarray value.
+        images (ArrayLike): An array containing input images.
+        traces (ArrayLike): An array containing input trace data.
+        spatial_threshold (Union[float, ArrayLike]): The threshold(s) for spatial roughness.
+            Can be a single float or ArrayLike value.
+        temporal_threshold (Union[float, ArrayLike]): The threshold(s) for temporal roughness.
+            Can be a single float or ArrayLike value.
 
     Returns:
-        jnp.ndarray: An array containing the fitness evaluation for each image-trace pair.
+        Array: An array containing the fitness evaluation for each image-trace pair.
             Returns 1 if both spatial and temporal conditions are met for a pair, otherwise returns 0.
     """
 
