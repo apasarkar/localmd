@@ -17,6 +17,7 @@ from localmd.evaluation import spatial_roughness_stat_vmap, temporal_roughness_s
 from localmd.pmd_loader import PMDLoader
 from localmd.pmdarray import PMDArray
 
+from localmd.dataset import lazy_data_loader
 from typing import *
 
 
@@ -447,10 +448,12 @@ def check_fov_size(fov_dims: Tuple[int, int], min_allowed_value: int = 10) -> No
                              "too small to process".format(min_allowed_value))
 
 
-def localmd_decomposition(dataset_obj, block_sizes, frame_range, max_components=50, background_rank=15, sim_conf=5,
-                          frame_batch_size=10000, dtype='float32', num_workers=0, pixel_batch_size=5000,
-                          registration_routine=None, max_consecutive_failures=1, rank_prune=False,
-                          temporal_avg_factor=10):
+def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, frame_range: int,
+                          max_components: int = 50, background_rank: int = 15, sim_conf: int = 5,
+                          frame_batch_size: int = 10000, dtype: str = 'float32', num_workers: int = 0,
+                          pixel_batch_size: int = 5000, registration_routine: Callable = None,
+                          max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10):
+
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank,
                          batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size,
