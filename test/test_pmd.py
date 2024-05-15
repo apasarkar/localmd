@@ -22,7 +22,7 @@ class TestCompression:
             'block_width': 32,
             'frames_to_init': 5000,
             'background_rank': 1,
-            'max_consec_failures': 1,
+            'max_consecutive_failures': 1,
             'max_components': 40,
             'rank_prune': False,
         }
@@ -38,7 +38,7 @@ class TestCompression:
         block_sizes = [block_height, block_width]
 
         rank_prune = self.pmd_params_dict['rank_prune']
-        max_consec_failures = self.pmd_params_dict['max_consec_failures']
+        max_consecutive_failures = self.pmd_params_dict['max_consecutive_failures']
         frames_to_init = self.pmd_params_dict['frames_to_init']
         background_rank = self.pmd_params_dict['background_rank']
 
@@ -46,8 +46,6 @@ class TestCompression:
         sim_conf = 5
 
         max_components = self.pmd_params_dict['max_components']
-
-        registration_routine = None
 
         frame_batch_size = 2000
         pixel_batch_size = 10000
@@ -58,8 +56,8 @@ class TestCompression:
                                   sim_conf=sim_conf, \
                                   frame_batch_size=frame_batch_size, pixel_batch_size=pixel_batch_size,
                                   dtype=dtype, \
-                                  num_workers=0, registration_routine=registration_routine,
-                                  max_consec_failures=max_consec_failures,
+                                  num_workers=0, \
+                                  max_consecutive_failures=max_consecutive_failures,
                                   rank_prune=rank_prune)
 
     @pytest.mark.parametrize("fov1", [10, 30, 50])
@@ -69,7 +67,7 @@ class TestCompression:
         new_dataset = self.dataset[:, 0:fov1, 0:fov2]
 
         rank_prune = self.pmd_params_dict['rank_prune']
-        max_consec_failures = self.pmd_params_dict['max_consec_failures']
+        max_consecutive_failures = self.pmd_params_dict['max_consecutive_failures']
         frames_to_init = self.pmd_params_dict['frames_to_init']
         background_rank = self.pmd_params_dict['background_rank']
 
@@ -89,8 +87,8 @@ class TestCompression:
                                   sim_conf=sim_conf, \
                                   frame_batch_size=frame_batch_size, pixel_batch_size=pixel_batch_size,
                                   dtype=dtype, \
-                                  num_workers=0, registration_routine=registration_routine,
-                                  max_consec_failures=max_consec_failures,
+                                  num_workers=0, \
+                                  max_consecutive_failures=max_consecutive_failures,
                                   rank_prune=rank_prune)
 
     def teardown_method(self):

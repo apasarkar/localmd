@@ -1,12 +1,11 @@
 import numpy as np
-import scipy
 import scipy.sparse
 from typing import *
-from scipy.sparse import csr_matrix
+from scipy.sparse import coo_matrix
 
 
-class PMDArray():
-    def __init__(self, U: scipy.sparse.coo_matrix, R: np.ndarray, s: np.ndarray,
+class PMDArray:
+    def __init__(self, U: coo_matrix, R: np.ndarray, s: np.ndarray,
                  V: np.ndarray, data_shape: tuple[int, int, int], data_order: str, mean_img: np.ndarray,
                  std_img: np.ndarray):
         """
@@ -56,6 +55,10 @@ class PMDArray():
         """Array dimensions."""
         return (self.T, self.d1, self.d2)
 
+    @property
+    def ndim(self):
+        return 3
+
     def _parse_int_to_list(self, elt):
         if isinstance(elt, int):
             return [elt]
@@ -83,7 +86,7 @@ class PMDArray():
         implied_fov_shape = used_rows.shape
         return u_used, mean_used, var_used, implied_fov_shape
 
-    def temporal_crop(self, key: Union[np.ndarray, list, int]) -> np.ndarray:
+    def temporal_crop(self, key: Union[np.ndarray, slice, list, int]) -> np.ndarray:
         """
 
         Args:

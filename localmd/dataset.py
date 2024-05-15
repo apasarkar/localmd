@@ -5,13 +5,12 @@ from typing import *
 
 
 class lazy_data_loader(ABC):
-    '''
+    """
     This captures the numpy array-like functionality that all data loaders for motion correction need to contain
 
     Key: To implement support for a new file type, you just need to specify the key properties below (dtype, shape, ndim)
     and then implement the function _compute_at_indices.
-    Adapted from mesmerize core: https://github.com/nel-lab/mesmerize-core/blob/master/mesmerize_core/arrays/_base.py
-    '''
+    """
 
     @property
     @abstractmethod
@@ -116,28 +115,25 @@ class lazy_data_loader(ABC):
         """
         Lazy computation logic goes here to return frames. Slices the array over time (dimension 0) at the desired indices.
 
-        Parameters
-        ----------
-        indices: Union[list, int, slice]
-            the user's desired way of picking frames, either an int, list of ints, or slice
-             i.e. slice object or int passed from `__getitem__()`
+        Args:
+            indices (Union[list, int, slice]): The user's desired way of picking frames, either an int, list of ints,
+             or slice i.e. slice object or int passed from `__getitem__()`
 
-        Returns
-        -------
-        np.ndarray
-            array at the indexed slice
+        Returns:
+            (np.ndarray): array at the indexed slice
         """
         pass
+
 
 class TiffArray(lazy_data_loader):
 
     def __init__(self, filename):
         """
-        TiffArray data loading object. Supports loading data from multipage tiff files.
+        TiffArray data loading object. Supports loading data from multipage tiff files. Does not use memmap (since
+        not all files are compatible with memmap).
 
         Args:
             filename (str): Path to file
-
         """
         self.filename = filename
 
@@ -152,8 +148,7 @@ class TiffArray(lazy_data_loader):
     @property
     def shape(self) -> Tuple[int, int, int]:
         """
-        Tuple[int]
-            (n_frames, dims_x, dims_y)
+        Returns the shape (n_frames, dims_x, dims_y) of the data
         """
         with tifffile.TiffFile(self.filename) as tffl:
             num_frames = len(tffl.pages)
@@ -165,8 +160,7 @@ class TiffArray(lazy_data_loader):
     @property
     def ndim(self) -> int:
         """
-        int
-            Number of dimensions
+        Returns number of dimensions
         """
         return len(self.shape)
 
@@ -179,4 +173,3 @@ class TiffArray(lazy_data_loader):
             indices_list = list(range(indices.start or 0, indices.stop or self.shape[0], indices.step or 1))
             data = tifffile.imread(self.filename, key=indices_list).squeeze()
         return data.astype(self.dtype)
-
