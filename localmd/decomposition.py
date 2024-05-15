@@ -455,7 +455,7 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
                           max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10):
 
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
-    load_obj = PMDLoader(dataset_obj, dtype=dtype, center=True, normalize=True, background_rank=background_rank,
+    load_obj = PMDLoader(dataset_obj, dtype=dtype, background_rank=background_rank,
                          batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size,
                          registration_routine=registration_routine)
 
