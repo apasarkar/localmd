@@ -451,13 +451,12 @@ def check_fov_size(fov_dims: Tuple[int, int], min_allowed_value: int = 10) -> No
 def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, frame_range: int,
                           max_components: int = 50, background_rank: int = 15, sim_conf: int = 5,
                           frame_batch_size: int = 10000, dtype: str = 'float32', num_workers: int = 0,
-                          pixel_batch_size: int = 5000, registration_routine: Callable = None,
+                          pixel_batch_size: int = 5000,
                           max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10):
 
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(dataset_obj, dtype=dtype, background_rank=background_rank,
-                         batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size,
-                         registration_routine=registration_routine)
+                         batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size)
 
     #Decide which chunks of the data you will use for the spatial PMD blockwise fits
     window_chunks = 2000  #We will sample chunks of frames throughout the movie
@@ -486,8 +485,8 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     ##Get the spatial and temporal thresholds
     display(
         "Running Simulations, block dimensions are {} x {} x {} ".format(block_sizes[0], block_sizes[1], window_chunks))
-    spatial_thres, temporal_thres = threshold_heuristic([block_sizes[0], block_sizes[1], window_chunks], num_comps=1,
-                                                        iters=250, percentile_threshold=sim_conf)
+    spatial_threshold, temporal_threshold = threshold_heuristic([block_sizes[0], block_sizes[1], window_chunks],
+                                                                num_comps=1, iters=250, percentile_threshold=sim_conf)
 
     ##Load the data you will do blockwise SVD on
     display("Loading Data")
@@ -544,8 +543,8 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
             pairs.append((k, j))
             subset = data[k:k + block_sizes[0], j:j + block_sizes[1], :].astype(dtype)
             subset = subset[:, :, :crop_avg_constant]
-            spatial_cropped, temporal_cropped = windowed_pmd(window_chunks, subset, max_components, spatial_thres,
-                                                             temporal_thres, max_consecutive_failures,
+            spatial_cropped, temporal_cropped = windowed_pmd(window_chunks, subset, max_components, spatial_threshold,
+                                                             temporal_threshold, max_consecutive_failures,
                                                              temporal_avg_factor)
             total_temporal_fit.append(temporal_cropped)
 
@@ -592,7 +591,7 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
 
     ## Step 2f: Do sparse regression to get the V matrix: 
     display("Running sparse regression")
-    V = load_obj.V_projection([U_r.T, P.T])
+    V = load_obj.v_projection(U_r, P.T)
 
     #Extract necessary info from the loader object and delete it. This frees up space on GPU for the below linalg.eigh computations
     std_img = load_obj.std_img
@@ -662,28 +661,39 @@ def get_projector_noprune(U, tol=0.0001):
     return (U, random_mat_e)
 
 
-def get_projector(U, V, rank_prune_target: float = 3, deterministic: bool = False):
-    '''
-    This function uses random projection method described in Halko to find an orthonormal subspace which approximates the 
-    column span of UV. We want to express this subspace as a factorization: UP; this way we can keep the nice sparsity and avoid ever dealing with dense d x K (for any K) matrices (where d = number of pixels in movie). 
-    
-    Due to the overcomplete blockwise decomposition of PMD, we want to prune the rank of the PMD decomposition (U) by a factor of 4. We do this before regressing the entire movie onto the PMD object for memory and computational purposes (faster regression, more efficient GPU utilization). 
-    Input: 
-        U: scipy.sparse matrix of dimensions (d, R) where d is number of pixels, R is number of frames
-    Returns: 
-        Tuple (U, P) (described above)
-    '''
+def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
+                  deterministic: bool = False) -> tuple[coo_matrix, np.ndarray]:
+    """
+    This function uses sketching to find an orthonormal subspace which approximately captures the span of UV
+    We want to express this subspace as a factorization: UP; this way we can keep the nice sparsity and avoid ever
+    dealing with dense d x K (for any K) matrices (where d = number of pixels in movie).
+
+    Due to the overcomplete blockwise decomposition of PMD, we want to prune the rank of the PMD decomposition (U) by a
+     factor of 4. We do this before regressing the entire movie onto the PMD object for memory and computational
+      purposes (faster regression, more efficient GPU utilization).
+
+    Args:
+        u: scipy.sparse.coo_matrix matrix of dimensions (d, R) where d is number of pixels, R is number of frames
+        v (np.ndarray). Shape (R, T) where T is num frames
+        rank_prune_target (float): The fraction R which we want to keep
+        deterministic (boolean): Whether we want to avoid rank pruning and just do a deterministic SVD.
+
+    Returns:
+        tuple[scipy.sparse.coo_matrix, np.ndarray]
+            - u (the same input described above)
+            - the matrix P described above.
+    """
     rank_prune_factor = rank_prune_target / 1.05
     tol = 0.0001
-    keep_value = min(int(U.shape[1] / rank_prune_target), V.shape[1])
+    keep_value = min(int(u.shape[1] / rank_prune_target), v.shape[1])
 
     if not deterministic:
-        if int(U.shape[1] / rank_prune_target) < V.shape[1] and rank_prune_target > 1:
-            random_mat = np.random.randn(V.shape[1], int(U.shape[1] / rank_prune_factor))
-            random_mat = np.array(jnp.matmul(V, random_mat))
+        if int(u.shape[1] / rank_prune_target) < v.shape[1] and rank_prune_target > 1:
+            random_mat = np.random.randn(v.shape[1], int(u.shape[1] / rank_prune_factor))
+            random_mat = np.array(jnp.matmul(v, random_mat))
         else:
-            random_mat = V
-        UtU = U.T.dot(U)
+            random_mat = v
+        UtU = u.T.dot(u)
         UtUR = UtU.dot(random_mat)
         RtUtUR = np.array(jnp.matmul(random_mat.T, UtUR))
 
@@ -703,12 +713,12 @@ def get_projector(U, V, rank_prune_target: float = 3, deterministic: bool = Fals
 
         random_mat_e = random_mat_e[:, good_components]
         random_mat_e = random_mat_e[:, :keep_value]
-        return (U, random_mat_e)
+        return u, random_mat_e
 
     else:
         display("For Reference purposes only: DETERMINISTIC")
-        R, s, T = factored_svd_debug(U, V, factor=0.5)
-        return U, R
+        r, s, _ = factored_svd_debug(u, v, factor=0.5)
+        return u, r
 
 
 def eigenvalue_and_eigenvector_routine(sigma):
@@ -722,11 +732,11 @@ def eigenvalue_and_eigenvector_routine(sigma):
 
 
 def compute_sigma(spatial_components, Lt):
-    '''
-    Note: Lt here refers to the upper triangular matrix from the QR factorization of V ("temporal_components"). So 
-    temporal_components.T = Qt.dot(Lt), which means that 
+    """
+    Note: Lt here refers to the upper triangular matrix from the QR factorization of V ("temporal_components"). So
+    temporal_components.T = Qt.dot(Lt), which means that
     UV = U(Lt.T)(Qt.T)
-    '''
+    """
     Lt = np.array(Lt)
     UtU = spatial_components.T.dot(spatial_components)
     UtUL = UtU.dot(Lt.T)
@@ -736,12 +746,12 @@ def compute_sigma(spatial_components, Lt):
 
 
 def rank_prune_svd(mixing_weights, singular_values, temporal_basis, factor=0.25):
-    '''
-    Inputs: 
+    """
+    Inputs:
         mixing_weights: numpy.ndarray, shape (R x R)
         singular_values: numpy.ndarray, shape (R)
         temporal_basis: numpy.ndarray, shape (R, T)
-    '''
+    """
     dimension = singular_values.shape[0]
     index = int(math.floor(factor * dimension))
     if index == 0:
@@ -757,12 +767,12 @@ def rank_prune_svd(mixing_weights, singular_values, temporal_basis, factor=0.25)
 
 
 def factored_svd_debug(spatial_components, temporal_components, factor=0.25):
-    '''
-    This is a fast method to convert a low-rank decomposition (spatial_components * temporal_components) into a 
-    Inputs: 
+    """
+    This is a fast method to convert a low-rank decomposition (spatial_components * temporal_components) into a
+    Inputs:
         spatial_components: scipy.sparse.coo_matrix. Shape (d, R)
         temporal_components: jax.numpy. Shape (R, T)
-    '''
+    """
     Qt, Lt = jnp.linalg.qr(temporal_components.transpose(), mode='reduced')
     Sigma = compute_sigma(spatial_components, Lt)
     eig_vecs, eig_vals = eigenvalue_and_eigenvector_routine(Sigma)
