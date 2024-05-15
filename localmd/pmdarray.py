@@ -55,6 +55,10 @@ class PMDArray:
         """Array dimensions."""
         return (self.T, self.d1, self.d2)
 
+    @property
+    def ndim(self):
+        return 3
+
     def _parse_int_to_list(self, elt):
         if isinstance(elt, int):
             return [elt]
