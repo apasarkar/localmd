@@ -300,13 +300,18 @@ def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_th
         final_spatial_decomposition (np.ndarray): Shape (d1, d2, num_comps); this describes the spatial basis
         final_temporal_decomposition (np.ndarray): Shape (num_comps, T); this describes the corresponding temporal comps
 
-    Key: np.tensordot(final_spatial_decomposition, final_tempooral_decomposition, axes=(2,0)) should give the
+    Key: np.tensordot(final_spatial_decomposition, final_temporal_decomposition, axes=(2,0)) should give the
         decomposition of the input data
     """
     d1, d2 = (block.shape[0], block.shape[1])
     window_range = block.shape[2]
-    assert window_length <= window_range
+    if window_length > window_range:
+        window_length = window_range
     start_points = list(range(0, window_range, window_length))
+
+    #This guarantees that we always load a large number of frames when doing the decompositions below
+    if len(start_points) > 0 and start_points[-1] + window_length > window_range:
+        start_points[-1] = window_range - window_length
 
     final_spatial_decomposition = np.zeros((d1, d2, max_rank))
     remaining_components = max_rank
@@ -689,7 +694,7 @@ def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
 
     if not deterministic:
         if int(u.shape[1] / rank_prune_target) < v.shape[1] and rank_prune_target > 1:
-            random_mat = np.random.randn(v.shape[1], int(u.shape[1] / rank_prune_factor))
+            random_mat = np.random.normal(0, 1, size=(v.shape[1], int(u.shape[1] / rank_prune_factor)))
             random_mat = np.array(jnp.matmul(v, random_mat))
         else:
             random_mat = v
@@ -840,6 +845,34 @@ def more_rows_svd_routine(projection: jnp.ndarray, data: jnp.ndarray) -> Tuple[j
 
     left_projection = jnp.matmul(projection, left)
     return left_projection, singular_values, right_singular_matrix
+
+
+@partial(jit)
+def svd_new_temporal(R: np.ndarray, s: np.ndarray, V: np.ndarray):
+    """
+    We have a PMD decomposition in SVD format: (UR)s(V) (left singular vectors, singular values, right singular vectors). 
+    Sometimes we want to apply transformations to V (like high pass filtering or deconvolution)
+    This routine takes an updated temporal matrix and computes a fast updated SVD.
+    Given a transformed V, we compute the new singular values and right singular vectors. 
+
+    Args:
+        R (np.ndarray). Shape (full_rank, pruned_rank). The mixing matrix in URsV
+        s (np.ndarray): Shape (pruned_rank,). The current singular values
+        V_new (np.ndarray): Shape (pruned_rank, timepoints). The updated rank of the data
+    Returns:
+        mixing_matrix (np.ndarray). The new "R" in the URsV decomposition
+        singular_values (np.ndarray): Shape (rank,). The new singular values
+        right_singular_matrix (np.ndarray): Shape (rank, timepoints). The updated singular values
+    """
+    V_combined = s[:, None]*V
+    v_vt = jnp.dot(V_combined, V_combined.T)
+    left, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
+    singular_values = jnp.sqrt(vals)
+    divisor = jnp.where(singular_values == 0, 1, singular_values)
+    V_new = jnp.divide(jnp.matmul(left.transpose(), V_combined), jnp.expand_dims(divisor, 1))
+
+    return R@left, singular_values, V_new
+ 
 
 
 @partial(jit)
