@@ -591,7 +591,7 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     if rank_prune:
         U_r, P = get_projector(U_r, V_cropped)
     else:
-        U_r, P = get_projector_noprune(U_r)
+        U_r, P = get_projector_noprune(U_r, V_cropped)
     display("After performing rank reduction, the updated rank is {}".format(P.shape[1]))
 
     ## Step 2f: Do sparse regression to get the V matrix: 
@@ -641,11 +641,16 @@ def aggregate_uv(u: coo_matrix, v: np.ndarray, spatial_basis: np.ndarray,
     return u_net, v_net
 
 
-def get_projector_noprune(U, tol=0.0001):
-    UtU = U.T.dot(U)
-    random_mat = np.eye(U.shape[1])
-    UtUR = UtU.dot(random_mat)
-    RtUtUR = np.array(jnp.matmul(random_mat.T, UtUR))
+def get_projector_noprune(u: coo_matrix,
+                          v: np.ndarray,
+                          tol=0.0001):
+    UtU = u.T.dot(u)
+    if u.shape[1] > v.shape[1]:
+        right_mat = v
+    else:
+        right_mat = np.eye(u.shape[1])
+    UtUR = UtU.dot(right_mat)
+    RtUtUR = np.array(jnp.matmul(right_mat.T, UtUR))
 
     eig_vecs, eig_vals, _ = jnp.linalg.svd(RtUtUR, full_matrices=False, hermitian=True)
     eig_vals = np.array(eig_vals)
@@ -655,7 +660,7 @@ def get_projector_noprune(U, tol=0.0001):
     good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
 
     #Apply the eigenvectors to random_mat
-    random_mat_e = np.array(jnp.matmul(random_mat, eig_vecs))
+    random_mat_e = np.array(jnp.matmul(right_mat, eig_vecs))
 
     singular_values = np.sqrt(eig_vals)
 
@@ -663,7 +668,7 @@ def get_projector_noprune(U, tol=0.0001):
     singular_values = singular_values[good_components]
     random_mat_e = random_mat_e / singular_values[None, :]
 
-    return (U, random_mat_e)
+    return (u, random_mat_e)
 
 
 def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
