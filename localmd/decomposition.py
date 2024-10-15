@@ -737,7 +737,7 @@ def localmd_decomposition(
     if rank_prune:
         u_r, p = compute_pruned_orthogonal_spatial_basis(u_r, v_cropped)
     else:
-        u_r, p = compute_full_orthogonal_spatial_basis(u_r, v_cropped)
+        u_r, p, _, _ = compute_lowrank_factorized_svd(u_r, v_cropped)
     display(
         "After performing rank reduction, the updated rank is {}".format(p.shape[1])
     )
@@ -790,32 +790,43 @@ def aggregate_local_and_global_decomposition(
     return u_net, v_net
 
 
-def compute_full_orthogonal_spatial_basis(u: coo_matrix, v: np.ndarray, tol=0.0001):
-    UtU = u.T.dot(u)
+def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray):
+    """
+    Given a low-rank factorization of a matrix: Data = u @ v, where u is sparse,
+    this routine efficiently computes the factorized singular value decomposition of u @ v
+
+    Args:
+        u (scipy.sparse.coo_matrix): shape (pixels, low rank): sparse left matrix of low rank factorization
+        v (numpy.ndarray): shape (low rank, frames): dense right matrix of low rank factorization
+    Returns:
+        u (scipy.sparse.coo_matrix): the spatial matrix
+        r (np.ndarray): the spatial mixing matrix (u.dot(r) forms the left singular vectors)
+        s (np.ndarray): 1d diagonal vector of singular values
+        v (np.ndarray): the right singular vectors
+
+    Together, (u@r)@np.diag(s)@v gives the singular value decomposition
+    """
+    ut_u = u.T.dot(u)
+
     if u.shape[1] > v.shape[1]:
         right_mat = v
     else:
         right_mat = np.eye(u.shape[1])
-    UtUR = UtU.dot(right_mat)
-    RtUtUR = np.array(jnp.matmul(right_mat.T, UtUR))
 
-    eig_vecs, eig_vals, _ = jnp.linalg.svd(RtUtUR, full_matrices=False, hermitian=True)
+    ut_ur = ut_u.dot(right_mat)
+    rtut_ur = np.array(jnp.matmul(right_mat.T, ut_ur))
+
+    eig_vecs, eig_vals, _ = jnp.linalg.svd(rtut_ur, full_matrices=False, hermitian=True)
     eig_vals = np.array(eig_vals)
     eig_vecs = np.array(eig_vecs)
 
-    # Now filter any remaining bad components
-    good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
-
     # Apply the eigenvectors to random_mat
-    random_mat_e = np.array(jnp.matmul(right_mat, eig_vecs))
+    spatial_mixing_matrix = np.array(jnp.matmul(right_mat, eig_vecs))
 
     singular_values = np.sqrt(eig_vals)
+    spatial_mixing_matrix /= singular_values[None, :]
 
-    random_mat_e = random_mat_e[:, good_components]
-    singular_values = singular_values[good_components]
-    random_mat_e = random_mat_e / singular_values[None, :]
-
-    return (u, random_mat_e)
+    return u, spatial_mixing_matrix, singular_values, eig_vecs.T
 
 
 def compute_pruned_orthogonal_spatial_basis(
