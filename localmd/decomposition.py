@@ -457,11 +457,13 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
                           max_components: int = 50, background_rank: int = 15, sim_conf: int = 5,
                           frame_batch_size: int = 10000, dtype: str = 'float32', num_workers: int = 0,
                           pixel_batch_size: int = 5000,
-                          max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10):
+                          max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10,
+                          order: str="F"):
 
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(dataset_obj, dtype=dtype, background_rank=background_rank,
-                         batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size)
+                         batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size,
+                         order=order)
 
     #Decide which chunks of the data you will use for the spatial PMD blockwise fits
     window_chunks = 2000  #We will sample chunks of frames throughout the movie

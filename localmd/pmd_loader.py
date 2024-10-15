@@ -108,7 +108,7 @@ class FrameDataloader:
 class PMDLoader:
     def __init__(self, dataset: lazy_data_loader, dtype='float32', background_rank: int = 15,
                  batch_size: int = 2000, num_workers: int = None, pixel_batch_size: int = 5000,
-                 num_samples: int = 10):
+                 num_samples: int = 10, order: str="F"):
         """
         Args:
             dataset: Object which implements the PMDDataset abstract interface. This is a basic reader which allows us
@@ -124,8 +124,10 @@ class PMDLoader:
             num_samples: int. when we estimate mean and noise variance, we take 8 samples of the data, each sample has
                 'batch_size' number of continuous frames. If there are fewer than num_samples * batch_size frames in
                 the dataset, we just sequentially load the entire dataset to get these estimates.
+            order (str): "F" or "C" depending whether the 2D images in the video should be reshaped into a flattened,
+                1D column vector in column major ("F") or row major ("C") order
         """
-        self._order = "F"
+        self._order = order
         self.dataset = dataset
         self.dtype = dtype
 
