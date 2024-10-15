@@ -713,11 +713,11 @@ def localmd_decomposition(
             spatial_overall_values.extend(spatial_values_f)
             column_number += spatial_cropped.shape[2]
 
-    U_r = coo_matrix(
+    u_r = coo_matrix(
         (spatial_overall_values, (final_row_indices, final_column_indices)),
         shape=(data.shape[0] * data.shape[1], column_number),
     )
-    V_cropped = np.concatenate(total_temporal_fit, axis=0)
+    v_cropped = np.concatenate(total_temporal_fit, axis=0)
 
     display("Normalizing by weights")
     weight_normalization_diag = np.zeros((data.shape[0] * data.shape[1],))
@@ -726,25 +726,25 @@ def localmd_decomposition(
     )
 
     normalizing_weights = diags([(1 / weight_normalization_diag).ravel()], [0])
-    U_r = normalizing_weights.dot(U_r)
+    u_r = normalizing_weights.dot(u_r)
 
-    U_r, V_cropped = aggregate_uv(
-        U_r, V_cropped, load_obj.spatial_basis, temporal_basis_crop
+    u_r, v_cropped = aggregate_uv(
+        u_r, v_cropped, load_obj.spatial_basis, temporal_basis_crop
     )
-    display("The total rank before pruning is {}".format(U_r.shape[1]))
+    display("The total rank before pruning is {}".format(u_r.shape[1]))
 
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
     if rank_prune:
-        U_r, P = get_projector(U_r, V_cropped)
+        u_r, p = get_projector(u_r, v_cropped)
     else:
-        U_r, P = get_projector_noprune(U_r, V_cropped)
+        u_r, p = get_projector_noprune(u_r, v_cropped)
     display(
-        "After performing rank reduction, the updated rank is {}".format(P.shape[1])
+        "After performing rank reduction, the updated rank is {}".format(p.shape[1])
     )
 
-    ## Step 2f: Do sparse regression to get the V matrix:
+    ## Step 2f: Do sparse regression to get the v matrix:
     display("Running sparse regression")
-    V = load_obj.v_projection(U_r, P.T)
+    v = load_obj.v_projection(u_r, p.T)
 
     # Extract necessary info from the loader object and delete it. This frees up space on GPU for the below linalg.eigh computations
     std_img = load_obj.std_img
@@ -753,16 +753,16 @@ def localmd_decomposition(
     shape = load_obj.shape
     del load_obj
 
-    ## Step 2h: Do a SVD Reformat given U and V
+    ## Step 2h: Do a SVD Reformat given u and v
     display("Final reformat of data into complete SVD")
-    R, s, Vt = factored_svd(P, V)
-    R = np.array(R)
+    r, s, vt = factored_svd(p, v)
+    r = np.array(r)
     s = np.array(s)
-    Vt = np.array(Vt)
+    vt = np.array(vt)
 
     display("Matrix decomposition completed")
 
-    final_movie = PMDArray(U_r, R, s, Vt, shape, order, mean_img, std_img)
+    final_movie = PMDArray(u_r, r, s, vt, shape, order, mean_img, std_img)
     return final_movie
 
 
