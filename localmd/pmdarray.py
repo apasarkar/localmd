@@ -7,10 +7,10 @@ from scipy.sparse import coo_matrix
 class PMDArray:
     def __init__(
         self,
-        U: coo_matrix,
-        R: np.ndarray,
+        u: coo_matrix,
+        r: np.ndarray,
         s: np.ndarray,
-        V: np.ndarray,
+        v: np.ndarray,
         data_shape: tuple[int, int, int],
         data_order: str,
         mean_img: np.ndarray,
@@ -22,15 +22,14 @@ class PMDArray:
         which allows you to efficiently slice frames and spatial subsets of the data.
 
         Args:
-            U (scipy.sparse._coo.coo_matrix): Dimensions (d, K1), where K1 is larger than the estimated rank of the data.
+            u (scipy.sparse._coo.coo_matrix): Dimensions (d, K1), where K1 is larger than the estimated rank of the data.
                 Sparse spatial basis matrix for PMD decomposition.
-            R (numpy.ndarray): Dimensions (K1, K2) where K1 >= K2. This is a mixing matrix.
+            r (numpy.ndarray): Dimensions (K1, K2) where K1 >= K2. This is a mixing matrix.
                 Together: the product UR has orthonormal columns.
             s (numpy.ndarray): Shape (K2,). "s" describes a diagonal matrix; we just store the
                 diagonal values for efficiency
-            V (numpy.ndarray): shape (K2, T). Has orthonormal rows.
-            data_shape (tuple): Tuple of 3 ints (T, d1, d2). The first two (d1 x d2) describe the field of view
-                dimensions and T is the number of frames
+            v (numpy.ndarray): shape (K2, T). Has orthonormal rows.
+            data_shape (tuple): Tuple of 3 ints (number of frames, fov dimension 1, fov dimension 2).
             data_order: In the compression we work with 3D data but flatten each frame into a column vector in our
                 decomposition. This "order" param is either "F" or "C" and indicates how to reshape to both
                 unflatten or flatten data.
@@ -43,17 +42,35 @@ class PMDArray:
                 significantly more compression savings over large FOV data.
         """
         self.order = data_order
-        self.T, self.d1, self.d2 = data_shape
-        self.U_sparse = U.tocsr()
-        self.R = R
-        self.s = s
-        self.V = V
-        self._RsV = (R * s[None, :]).dot(V)  # Fewer computations when doing __getitem__
+        self.num_frames, self.fov_dim1, self.fov_dim2 = data_shape
+        self._u = u.tocsr()
+        self._r = r
+        self._s = s
+        self._v = v
+        self._combined_temporal = (self.r * self.s[None, :]).dot(
+            self.v
+        )  # Fewer computations when doing __getitem__
         self.mean_img = mean_img
         self.var_img = std_img
-        self.row_indices = np.arange(self.d1 * self.d2).reshape(
-            (self.d1, self.d2), order=self.order
+        self.row_indices = np.arange(self.fov_dim1 * self.fov_dim2).reshape(
+            (self.fov_dim1, self.fov_dim2), order=self.order
         )
+
+    @property
+    def u(self):
+        return self._u
+
+    @property
+    def r(self):
+        return self._r
+
+    @property
+    def s(self):
+        return self._s
+
+    @property
+    def v(self):
+        return self._v
 
     @property
     def dtype(self):
@@ -63,7 +80,7 @@ class PMDArray:
     @property
     def shape(self):
         """Array dimensions."""
-        return (self.T, self.d1, self.d2)
+        return (self.num_frames, self.fov_dim1, self.fov_dim2)
 
     @property
     def ndim(self):
@@ -83,8 +100,9 @@ class PMDArray:
         Args:
             key (tuple): Length 2 tuple used to slice the rows of the data
         Returns:
-            U_used (scipy.sparse.csr_matrix). Cropped sparse spatial matrix
-            mean_used (np.ndarray):
+            u_used (scipy.sparse.csr_matrix). Cropped sparse spatial matrix
+            mean_used (np.ndarray): the spatially cropped mean
+            var_used (np.ndarray): the spatially cropped variance image
             implied_fov (tuple). Tuple of integer(s) specifying the implied FOV dimensions
         """
         if key[0] is None or key[1] is None:
@@ -94,7 +112,7 @@ class PMDArray:
         used_rows = self.row_indices[key[0], key[1]]
         mean_used = self.mean_img[key[0], key[1]]
         var_used = self.var_img[key[0], key[1]]
-        u_used = self.U_sparse[used_rows.reshape((-1,), order=self.order)]
+        u_used = self.u[used_rows.reshape((-1,), order=self.order)]
         implied_fov_shape = used_rows.shape
         return u_used, mean_used, var_used, implied_fov_shape
 
@@ -109,7 +127,7 @@ class PMDArray:
         if key is None:
             raise ValueError("Cannot use None for indexing")
 
-        return self._RsV[:, self._parse_int_to_list(key)]
+        return self._combined_temporal[:, self._parse_int_to_list(key)]
 
     def __getitem__(self, key) -> np.ndarray:
         """Returns self[key]. Does NOT support dimension expansion."""
