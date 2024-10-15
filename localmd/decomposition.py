@@ -12,8 +12,12 @@ import numpy as np
 from scipy.sparse import coo_matrix, hstack, diags, csr_matrix
 from jax import jit
 
-from localmd.evaluation import spatial_roughness_stat_vmap, temporal_roughness_stat_vmap, \
-    construct_final_fitness_decision, filter_by_failures
+from localmd.evaluation import (
+    spatial_roughness_stat_vmap,
+    temporal_roughness_stat_vmap,
+    construct_final_fitness_decision,
+    filter_by_failures,
+)
 from localmd.pmd_loader import PMDLoader
 from localmd.pmdarray import PMDArray
 
@@ -25,13 +29,15 @@ def display(msg):
     """
     Printing utility that logs time and flushes.
     """
-    tag = '[' + datetime.datetime.today().strftime('%y-%m-%d %H:%M:%S') + ']: '
-    sys.stdout.write(tag + msg + '\n')
+    tag = "[" + datetime.datetime.today().strftime("%y-%m-%d %H:%M:%S") + "]: "
+    sys.stdout.write(tag + msg + "\n")
     sys.stdout.flush()
 
 
 @partial(jit)
-def truncated_random_svd(input_matrix: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLike) -> tuple[Array, Array]:
+def truncated_random_svd(
+    input_matrix: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLike
+) -> tuple[Array, Array]:
     """
     Runs a fast truncated SVD operation to get a low-rank truncated SVD of input_matrix. Uses randomness
 
@@ -61,15 +67,16 @@ def truncated_random_svd(input_matrix: ArrayLike, key: ArrayLike, rank_placehold
     u_final = q.dot(u)
     v = jnp.multiply(jnp.expand_dims(s, axis=1), v)
 
-    #Final step: prune the rank 
+    # Final step: prune the rank
     u_truncated = jax.lax.dynamic_slice(u_final, (0, 0), (u_final.shape[0], rank))
     v_truncated = jax.lax.dynamic_slice(v, (0, 0), (rank, v.shape[1]))
     return u_truncated, v_truncated
 
 
 @partial(jit)
-def decomposition_no_normalize_approx(block: ArrayLike, key: ArrayLike,
-                                      rank_placeholder: ArrayLike) -> tuple[Array, Array]:
+def decomposition_no_normalize_approx(
+    block: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLike
+) -> tuple[Array, Array]:
     """
     Runs the low rank decomposition pipeline without any normalization of pixels (centering, dividing by std dev, etc.)
 
@@ -92,8 +99,14 @@ def decomposition_no_normalize_approx(block: ArrayLike, key: ArrayLike,
 
 
 @partial(jit, static_argnums=(0, 1, 2))
-def rank_simulation(d1: int, d2: int, t: int, rank_placeholder: ArrayLike,
-                    key1: ArrayLike, key2: ArrayLike) -> tuple[Array, Array]:
+def rank_simulation(
+    d1: int,
+    d2: int,
+    t: int,
+    rank_placeholder: ArrayLike,
+    key1: ArrayLike,
+    key2: ArrayLike,
+) -> tuple[Array, Array]:
     """
     Performs a simulation to compute the spatial and temporal roughness statistics of some data
 
@@ -111,7 +124,9 @@ def rank_simulation(d1: int, d2: int, t: int, rank_placeholder: ArrayLike,
             - Temporal statistic(s) of the data
     """
     noise_data = jax.random.normal(key1, (d1, d2, t))
-    spatial, temporal = decomposition_no_normalize_approx(noise_data, key2, rank_placeholder)
+    spatial, temporal = decomposition_no_normalize_approx(
+        noise_data, key2, rank_placeholder
+    )
     return spatial, temporal
 
 
@@ -120,14 +135,20 @@ def make_jax_random_key() -> Array:
     Returns a jax pseudorandom key
     """
     ii32 = np.iinfo(np.int32)
-    prng_input = np.random.randint(low=ii32.min, high=ii32.max, size=1, dtype=np.int32)[0]
+    prng_input = np.random.randint(low=ii32.min, high=ii32.max, size=1, dtype=np.int32)[
+        0
+    ]
     key = jax.random.PRNGKey(prng_input)
 
     return key
 
 
-def threshold_heuristic(dimensions: tuple[int, int, int], num_comps: int = 1,
-                        iters: int = 250, percentile_threshold: float = 5) -> tuple[float, float]:
+def threshold_heuristic(
+    dimensions: tuple[int, int, int],
+    num_comps: int = 1,
+    iters: int = 250,
+    percentile_threshold: float = 5,
+) -> tuple[float, float]:
     """
     Generates a histogram of spatial and temporal roughness statistics from running the decomposition on random noise.
     This is used to decide how "smooth" the temporal and spatial components need to be in order to contain signal.
@@ -158,15 +179,24 @@ def threshold_heuristic(dimensions: tuple[int, int, int], num_comps: int = 1,
         spatial_list.append(x)
         temporal_list.append(y)
 
-    spatial_threshold = np.percentile(np.array(spatial_list).flatten(), percentile_threshold)
-    temporal_threshold = np.percentile(np.array(temporal_list).flatten(), percentile_threshold)
+    spatial_threshold = np.percentile(
+        np.array(spatial_list).flatten(), percentile_threshold
+    )
+    temporal_threshold = np.percentile(
+        np.array(temporal_list).flatten(), percentile_threshold
+    )
     return spatial_threshold, temporal_threshold
 
 
 @partial(jit, static_argnums=(3,))
-def single_block_md(block: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLike,
-                    temporal_avg_factor: int, spatial_threshold: float,
-                    temporal_threshold: float) -> tuple[Array, Array, Array]:
+def single_block_md(
+    block: ArrayLike,
+    key: ArrayLike,
+    rank_placeholder: ArrayLike,
+    temporal_avg_factor: int,
+    spatial_threshold: float,
+    temporal_threshold: float,
+) -> tuple[Array, Array, Array]:
     """
     Runs the low rank truncated SVD decomposition on a subpatch of the data.
     Key assumptions:
@@ -193,7 +223,9 @@ def single_block_md(block: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLik
     order = "F"
     d1, d2, t = block.shape
 
-    block_2d = jnp.reshape(block, (d1 * d2, temporal_avg_factor, t // temporal_avg_factor), order=order)
+    block_2d = jnp.reshape(
+        block, (d1 * d2, temporal_avg_factor, t // temporal_avg_factor), order=order
+    )
     block_2d_avg = jnp.mean(block_2d, axis=1)
 
     # decomposition = truncated_random_svd(block_2d_avg, key, rank_placeholder)
@@ -202,16 +234,23 @@ def single_block_md(block: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLik
     u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order=order)
 
     # Now we begin the evaluation phase
-    good_comps = construct_final_fitness_decision(u_mat, v_mat.T, spatial_threshold,
-                                                  temporal_threshold)
+    good_comps = construct_final_fitness_decision(
+        u_mat, v_mat.T, spatial_threshold, temporal_threshold
+    )
 
     return u_mat, good_comps, v_mat
 
 
 @partial(jit, static_argnums=(4,))
-def single_residual_block_md(block: ArrayLike, existing: ArrayLike, key: ArrayLike,
-                             rank_placeholder: ArrayLike, temporal_avg_factor: int, spatial_threshold,
-                             temporal_threshold):
+def single_residual_block_md(
+    block: ArrayLike,
+    existing: ArrayLike,
+    key: ArrayLike,
+    rank_placeholder: ArrayLike,
+    temporal_avg_factor: int,
+    spatial_threshold,
+    temporal_threshold,
+):
     """
     Used to extract more components from a block of data in a low rank decomposition after running single_block_md
 
@@ -242,7 +281,9 @@ def single_residual_block_md(block: ArrayLike, existing: ArrayLike, key: ArrayLi
     projection = jnp.matmul(existing_2d, jnp.matmul(existing_2d.transpose(), block_2d))
     block_2d = block_2d - projection
 
-    block_r = jnp.reshape(block_2d, (d1 * d2, temporal_avg_factor, t // temporal_avg_factor), order=order)
+    block_r = jnp.reshape(
+        block_2d, (d1 * d2, temporal_avg_factor, t // temporal_avg_factor), order=order
+    )
     block_r_avg = jnp.mean(block_r, axis=1)
 
     u_mat = truncated_random_svd(block_r_avg, key, rank_placeholder)[0]
@@ -250,8 +291,9 @@ def single_residual_block_md(block: ArrayLike, existing: ArrayLike, key: ArrayLi
     u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order=order)
 
     # Now we begin the evaluation phase
-    good_comps = construct_final_fitness_decision(u_mat, v_mat.T, spatial_threshold,
-                                                  temporal_threshold)
+    good_comps = construct_final_fitness_decision(
+        u_mat, v_mat.T, spatial_threshold, temporal_threshold
+    )
 
     return u_mat, good_comps, v_mat
 
@@ -263,20 +305,28 @@ def get_temporal_projector(spatial_decomposition: ArrayLike, block: ArrayLike) -
         spatial_decomposition (ArrayLike): Shape (d1, d2, r), r is the rank. All columns orthonormal
         block (ArrayLike): Shape (d1, d2, t), t is number of frames in data which we fit for PMD
 
-    Returns: 
+    Returns:
         temporal_decomposition (Array): Shape (r, t). Projection of block onto spatial basis
     """
     d1, d2, r = spatial_decomposition.shape
     t = block.shape[2]
-    spatial_decomposition_r = jnp.reshape(spatial_decomposition, (d1 * d2, r), order="F")
+    spatial_decomposition_r = jnp.reshape(
+        spatial_decomposition, (d1 * d2, r), order="F"
+    )
     block_r = jnp.reshape(block, (d1 * d2, t), order="F")
     temporal_decomposition = jnp.matmul(spatial_decomposition_r.transpose(), block_r)
     return temporal_decomposition
 
 
-def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_threshold: float,
-                 temporal_threshold: float, max_consecutive_failures: int,
-                 temporal_avg_factor: int) -> tuple[np.ndarray, np.ndarray]:
+def windowed_pmd(
+    window_length: int,
+    block: ArrayLike,
+    max_rank: int,
+    spatial_threshold: float,
+    temporal_threshold: float,
+    max_consecutive_failures: int,
+    temporal_avg_factor: int,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Implementation of windowed blockwise decomposition. Given a block of the movie (d1, d2, T), we break the movie
     into smaller chunks. (say (d1, d2, R) where R < T), and run the truncated SVD decomposition iteratively on these
@@ -309,7 +359,7 @@ def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_th
         window_length = window_range
     start_points = list(range(0, window_range, window_length))
 
-    #This guarantees that we always load a large number of frames when doing the decompositions below
+    # This guarantees that we always load a large number of frames when doing the decompositions below
     if len(start_points) > 0 and start_points[-1] + window_length > window_range:
         start_points[-1] = window_range - window_length
 
@@ -325,13 +375,25 @@ def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_th
         key = make_jax_random_key()
         if k == 0 or component_counter == 0:
             subset = block[:, :, start_value:end_value]
-            spatial_comps, decisions, _ = single_block_md(subset, key, rank_placeholder, temporal_avg_factor,
-                                                          spatial_threshold, temporal_threshold)
+            spatial_comps, decisions, _ = single_block_md(
+                subset,
+                key,
+                rank_placeholder,
+                temporal_avg_factor,
+                spatial_threshold,
+                temporal_threshold,
+            )
         else:
             subset = block[:, :, start_value:end_value]
-            spatial_comps, decisions, _ = single_residual_block_md(subset, final_spatial_decomposition, key,
-                                                                   rank_placeholder, temporal_avg_factor, spatial_threshold,
-                                                                   temporal_threshold)
+            spatial_comps, decisions, _ = single_residual_block_md(
+                subset,
+                final_spatial_decomposition,
+                key,
+                rank_placeholder,
+                temporal_avg_factor,
+                spatial_threshold,
+                temporal_threshold,
+            )
 
         spatial_comps = np.array(spatial_comps)
         decisions = np.array(decisions).flatten() > 0
@@ -340,16 +402,19 @@ def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_th
         final_filter_index = min(spatial_cropped.shape[2], remaining_components)
         spatial_cropped = spatial_cropped[:, :, :final_filter_index]
 
-        final_spatial_decomposition[:, :, component_counter:component_counter + spatial_cropped.shape[2]] = (
-            spatial_cropped)
+        final_spatial_decomposition[
+            :, :, component_counter : component_counter + spatial_cropped.shape[2]
+        ] = spatial_cropped
         component_counter += spatial_cropped.shape[2]
         if component_counter == max_rank:
             break
         else:
             remaining_components = max_rank - component_counter
 
-    #Run this first so that the jitted code can be reused across function calls (avoids recompilation...)
-    final_temporal_decomposition = np.array(get_temporal_projector(final_spatial_decomposition, block))
+    # Run this first so that the jitted code can be reused across function calls (avoids recompilation...)
+    final_temporal_decomposition = np.array(
+        get_temporal_projector(final_spatial_decomposition, block)
+    )
 
     final_spatial_decomposition = final_spatial_decomposition[:, :, :component_counter]
     final_temporal_decomposition = final_temporal_decomposition[:component_counter, :]
@@ -357,7 +422,9 @@ def windowed_pmd(window_length: int, block: ArrayLike, max_rank: int, spatial_th
     return final_spatial_decomposition, final_temporal_decomposition
 
 
-def identify_window_chunks(frame_range: int, total_frames: int, window_chunks: int) -> list:
+def identify_window_chunks(
+    frame_range: int, total_frames: int, window_chunks: int
+) -> list:
     """
     Args:
         frame_range (int): Number of frames to fit
@@ -383,7 +450,9 @@ def identify_window_chunks(frame_range: int, total_frames: int, window_chunks: i
     available_intervals = np.arange(0, total_frames, window_chunks)
     if available_intervals[-1] > total_frames - window_chunks:
         available_intervals[-1] = total_frames - window_chunks
-    starting_points = np.random.choice(available_intervals, size=num_intervals, replace=False)
+    starting_points = np.random.choice(
+        available_intervals, size=num_intervals, replace=False
+    )
     starting_points = np.sort(starting_points)
     display("sampled from the following regions: {}".format(starting_points))
 
@@ -397,7 +466,9 @@ def identify_window_chunks(frame_range: int, total_frames: int, window_chunks: i
     return net_frames
 
 
-def update_block_sizes(blocks: tuple, fov_shape: tuple, min_block_value: int = 10) -> list:
+def update_block_sizes(
+    blocks: tuple, fov_shape: tuple, min_block_value: int = 10
+) -> list:
     """
     If user specifies block sizes that are too large, this approach truncates the blocksizes appropriately
 
@@ -413,20 +484,26 @@ def update_block_sizes(blocks: tuple, fov_shape: tuple, min_block_value: int = 1
         ValueError if either block dimension is less than min allowed value.
     """
     if blocks[0] < min_block_value or blocks[1] < min_block_value:
-        raise ValueError("One of the block dimensions was less than min allowed value of {}, "
-                         "set to a larger value".format(min_block_value))
+        raise ValueError(
+            "One of the block dimensions was less than min allowed value of {}, "
+            "set to a larger value".format(min_block_value)
+        )
     final_blocks = []
     if blocks[0] > fov_shape[0]:
-        display("Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
-            blocks[0], fov_shape[0], fov_shape[0]
-        ))
+        display(
+            "Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
+                blocks[0], fov_shape[0], fov_shape[0]
+            )
+        )
         final_blocks.append(fov_shape[0])
     else:
         final_blocks.append(blocks[0])
     if blocks[1] > fov_shape[1]:
-        display("Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
-            blocks[1], fov_shape[1], fov_shape[1]
-        ))
+        display(
+            "Height blocksize was set to {} but corresponding dimension has size {}. Truncating to {}".format(
+                blocks[1], fov_shape[1], fov_shape[1]
+            )
+        )
         final_blocks.append(fov_shape[1])
     else:
         final_blocks.append(blocks[1])
@@ -449,22 +526,42 @@ def check_fov_size(fov_dims: Tuple[int, int], min_allowed_value: int = 10) -> No
     """
     for k in fov_dims:
         if k < min_allowed_value:
-            raise ValueError("At least one FOV dimension is lower than {}, "
-                             "too small to process".format(min_allowed_value))
+            raise ValueError(
+                "At least one FOV dimension is lower than {}, "
+                "too small to process".format(min_allowed_value)
+            )
 
 
-def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, frame_range: int,
-                          max_components: int = 50, background_rank: int = 15, sim_conf: int = 5,
-                          frame_batch_size: int = 10000, dtype: str = 'float32', num_workers: int = 0,
-                          pixel_batch_size: int = 5000,
-                          max_consecutive_failures=1, rank_prune: bool = False, temporal_avg_factor: int = 10):
+def localmd_decomposition(
+    dataset_obj: lazy_data_loader,
+    block_sizes: tuple,
+    frame_range: int,
+    max_components: int = 50,
+    background_rank: int = 15,
+    sim_conf: int = 5,
+    frame_batch_size: int = 10000,
+    dtype: str = "float32",
+    num_workers: int = 0,
+    pixel_batch_size: int = 5000,
+    max_consecutive_failures=1,
+    rank_prune: bool = False,
+    temporal_avg_factor: int = 10,
+    order: str = "F",
+):
 
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
-    load_obj = PMDLoader(dataset_obj, dtype=dtype, background_rank=background_rank,
-                         batch_size=frame_batch_size, num_workers=num_workers, pixel_batch_size=pixel_batch_size)
+    load_obj = PMDLoader(
+        dataset_obj,
+        dtype=dtype,
+        background_rank=background_rank,
+        batch_size=frame_batch_size,
+        num_workers=num_workers,
+        pixel_batch_size=pixel_batch_size,
+        order=order,
+    )
 
-    #Decide which chunks of the data you will use for the spatial PMD blockwise fits
-    window_chunks = 2000  #We will sample chunks of frames throughout the movie
+    # Decide which chunks of the data you will use for the spatial PMD blockwise fits
+    window_chunks = 2000  # We will sample chunks of frames throughout the movie
     if load_obj.shape[0] <= frame_range:
         display("WARNING: Specified using more frames than there are in the dataset.")
         frame_range = load_obj.shape[0]
@@ -472,26 +569,41 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
         end = load_obj.shape[0]
         frames = [i for i in range(start, end)]
         if frame_range <= window_chunks:
-            display("WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
-                window_chunks))
+            display(
+                "WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
+                    window_chunks
+                )
+            )
             window_chunks = frame_range
     else:
         if frame_range <= window_chunks:
             if frame_range < window_chunks:
-                display("WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
-                    window_chunks))
+                display(
+                    "WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
+                        window_chunks
+                    )
+                )
             window_chunks = frame_range
         frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
 
-    block_sizes = update_block_sizes(block_sizes, (dataset_obj.shape[1], dataset_obj.shape[2]))
+    block_sizes = update_block_sizes(
+        block_sizes, (dataset_obj.shape[1], dataset_obj.shape[2])
+    )
     overlap = [math.ceil(block_sizes[0] / 2), math.ceil(block_sizes[1] / 2)]
 
     ##Get the spatial and temporal thresholds
     display(
-        "Running Simulations, block dimensions are {} x {} x {} ".format(block_sizes[0], block_sizes[1], window_chunks))
-    spatial_threshold, temporal_threshold = threshold_heuristic([block_sizes[0], block_sizes[1], window_chunks],
-                                                                num_comps=1, iters=250, percentile_threshold=sim_conf)
+        "Running Simulations, block dimensions are {} x {} x {} ".format(
+            block_sizes[0], block_sizes[1], window_chunks
+        )
+    )
+    spatial_threshold, temporal_threshold = threshold_heuristic(
+        [block_sizes[0], block_sizes[1], window_chunks],
+        num_comps=1,
+        iters=250,
+        percentile_threshold=sim_conf,
+    )
 
     ##Load the data you will do blockwise SVD on
     display("Loading Data")
@@ -500,31 +612,41 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     ##Run PMD and get the compressed spatial representation of the data
     display("Obtaining blocks and running local SVD")
 
-    dim_1_iters = list(range(0, data.shape[0] - block_sizes[0] + 1, block_sizes[0] - overlap[0]))
-    if dim_1_iters[-1] != data.shape[0] - block_sizes[0] and data.shape[0] - block_sizes[0] != 0:
+    dim_1_iters = list(
+        range(0, data.shape[0] - block_sizes[0] + 1, block_sizes[0] - overlap[0])
+    )
+    if (
+        dim_1_iters[-1] != data.shape[0] - block_sizes[0]
+        and data.shape[0] - block_sizes[0] != 0
+    ):
         dim_1_iters.append(data.shape[0] - block_sizes[0])
 
-    dim_2_iters = list(range(0, data.shape[1] - block_sizes[1] + 1, block_sizes[1] - overlap[1]))
-    if dim_2_iters[-1] != data.shape[1] - block_sizes[1] and data.shape[1] - block_sizes[1] != 0:
+    dim_2_iters = list(
+        range(0, data.shape[1] - block_sizes[1] + 1, block_sizes[1] - overlap[1])
+    )
+    if (
+        dim_2_iters[-1] != data.shape[1] - block_sizes[1]
+        and data.shape[1] - block_sizes[1] != 0
+    ):
         dim_2_iters.append(data.shape[1] - block_sizes[1])
 
-    #Define the block weighting matrix
+    # Define the block weighting matrix
     block_weights = np.ones((block_sizes[0], block_sizes[1]), dtype=dtype)
     hbh = block_sizes[0] // 2
     hbw = block_sizes[1] // 2
     # Increase weights to value block centers more than edges
     block_weights[:hbh, :hbw] += np.minimum(
-        np.tile(np.arange(0, hbw), (hbh, 1)),
-        np.tile(np.arange(0, hbh), (hbw, 1)).T
+        np.tile(np.arange(0, hbw), (hbh, 1)), np.tile(np.arange(0, hbh), (hbw, 1)).T
     )
     block_weights[:hbh, hbw:] = np.fliplr(block_weights[:hbh, :hbw])
     block_weights[hbh:, :] = np.flipud(block_weights[:hbh, :])
 
-    sparse_indices = np.arange(data.shape[0] * data.shape[1]).reshape((data.shape[0], data.shape[1]),
-                                                                      order=load_obj.order)
-    row_number = 0
-    column_indices = []
-    row_indices = []
+    sparse_indices = np.arange(data.shape[0] * data.shape[1]).reshape(
+        (data.shape[0], data.shape[1]), order=load_obj.order
+    )
+    column_number = 0
+    final_row_indices = []
+    final_column_indices = []
     spatial_overall_values = []
     cumulative_weights = np.zeros((data.shape[0], data.shape[1]))
     total_temporal_fit = []
@@ -534,11 +656,12 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     if data.shape[2] // temporal_avg_factor <= max_components:
         string_to_disp = (
             f"WARNING: temporal avg factor is too big, max rank per block adjusted to {data.shape[2] // temporal_avg_factor}.\n"
-            "To avoid this, initialize with more frames or reduce temporal avg factor")
+            "To avoid this, initialize with more frames or reduce temporal avg factor"
+        )
         display(string_to_disp)
         max_components = int(data.shape[2] // temporal_avg_factor)
 
-    #Key: Crop temporal_basis_crop here. Long term refactor this
+    # Key: Crop temporal_basis_crop here. Long term refactor this
     crop_avg_constant = (data.shape[2] // temporal_avg_factor) * temporal_avg_factor
     temporal_basis_crop = temporal_basis_crop[:, :crop_avg_constant]
 
@@ -546,45 +669,68 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     for k in dim_1_iters:
         for j in dim_2_iters:
             pairs.append((k, j))
-            subset = data[k:k + block_sizes[0], j:j + block_sizes[1], :].astype(dtype)
+            subset = data[k : k + block_sizes[0], j : j + block_sizes[1], :].astype(
+                dtype
+            )
             subset = subset[:, :, :crop_avg_constant]
-            spatial_cropped, temporal_cropped = windowed_pmd(window_chunks, subset, max_components, spatial_threshold,
-                                                             temporal_threshold, max_consecutive_failures,
-                                                             temporal_avg_factor)
+            spatial_cropped, temporal_cropped = windowed_pmd(
+                window_chunks,
+                subset,
+                max_components,
+                spatial_threshold,
+                temporal_threshold,
+                max_consecutive_failures,
+                temporal_avg_factor,
+            )
             total_temporal_fit.append(temporal_cropped)
 
-            #Weight the spatial components here
+            # Weight the spatial components here
             spatial_cropped = spatial_cropped * block_weights[:, :, None]
             current_cumulative_weight = block_weights
-            cumulative_weights[k:k + block_sizes[0], j:j + block_sizes[1]] += current_cumulative_weight
+            cumulative_weights[
+                k : k + block_sizes[0], j : j + block_sizes[1]
+            ] += current_cumulative_weight
 
-            sparse_col_indices = sparse_indices[k:k + block_sizes[0], j:j + block_sizes[1]][:, :, None]
-            sparse_col_indices = sparse_col_indices + np.zeros((1, 1, spatial_cropped.shape[2]))
-            sparse_row_indices = np.zeros_like(sparse_col_indices)
-            addend = np.arange(row_number, row_number + spatial_cropped.shape[2])[None, None, :]
+            curr_spatial_row_indices = sparse_indices[
+                k : k + block_sizes[0], j : j + block_sizes[1]
+            ][:, :, None]
+            curr_spatial_row_indices = curr_spatial_row_indices + np.zeros(
+                (1, 1, spatial_cropped.shape[2])
+            )
 
-            sparse_row_indices = sparse_row_indices + addend
-            sparse_col_indices_f = sparse_col_indices.flatten().tolist()
-            sparse_row_indices_f = sparse_row_indices.flatten().tolist()
+            curr_spatial_col_indices = np.zeros_like(curr_spatial_row_indices)
+            addend = np.arange(column_number, column_number + spatial_cropped.shape[2])[
+                None, None, :
+            ]
+            curr_spatial_col_indices = curr_spatial_col_indices + addend
+
+            sparse_row_indices_f = curr_spatial_row_indices.flatten().tolist()
+            sparse_col_indices_f = curr_spatial_col_indices.flatten().tolist()
             spatial_values_f = spatial_cropped.flatten().tolist()
 
-            column_indices.extend(sparse_col_indices_f)
-            row_indices.extend(sparse_row_indices_f)
+            final_row_indices.extend(sparse_row_indices_f)
+            final_column_indices.extend(sparse_col_indices_f)
             spatial_overall_values.extend(spatial_values_f)
-            row_number += spatial_cropped.shape[2]
+            column_number += spatial_cropped.shape[2]
 
-    U_r = coo_matrix((spatial_overall_values, (column_indices, row_indices)),
-                     shape=(data.shape[0] * data.shape[1], row_number))
+    U_r = coo_matrix(
+        (spatial_overall_values, (final_row_indices, final_column_indices)),
+        shape=(data.shape[0] * data.shape[1], column_number),
+    )
     V_cropped = np.concatenate(total_temporal_fit, axis=0)
 
     display("Normalizing by weights")
     weight_normalization_diag = np.zeros((data.shape[0] * data.shape[1],))
-    weight_normalization_diag[sparse_indices.flatten()] = cumulative_weights.flatten()
-    normalizing_weights = diags(
-        [(1 / weight_normalization_diag).ravel()], [0])
+    weight_normalization_diag[sparse_indices.flatten(order=load_obj.order)] = (
+        cumulative_weights.flatten(order=load_obj.order)
+    )
+
+    normalizing_weights = diags([(1 / weight_normalization_diag).ravel()], [0])
     U_r = normalizing_weights.dot(U_r)
 
-    U_r, V_cropped = aggregate_uv(U_r, V_cropped, load_obj.spatial_basis, temporal_basis_crop)
+    U_r, V_cropped = aggregate_uv(
+        U_r, V_cropped, load_obj.spatial_basis, temporal_basis_crop
+    )
     display("The total rank before pruning is {}".format(U_r.shape[1]))
 
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
@@ -592,13 +738,15 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
         U_r, P = get_projector(U_r, V_cropped)
     else:
         U_r, P = get_projector_noprune(U_r, V_cropped)
-    display("After performing rank reduction, the updated rank is {}".format(P.shape[1]))
+    display(
+        "After performing rank reduction, the updated rank is {}".format(P.shape[1])
+    )
 
-    ## Step 2f: Do sparse regression to get the V matrix: 
+    ## Step 2f: Do sparse regression to get the V matrix:
     display("Running sparse regression")
     V = load_obj.v_projection(U_r, P.T)
 
-    #Extract necessary info from the loader object and delete it. This frees up space on GPU for the below linalg.eigh computations
+    # Extract necessary info from the loader object and delete it. This frees up space on GPU for the below linalg.eigh computations
     std_img = load_obj.std_img
     mean_img = load_obj.mean_img
     order = load_obj.order
@@ -618,8 +766,9 @@ def localmd_decomposition(dataset_obj: lazy_data_loader, block_sizes: tuple, fra
     return final_movie
 
 
-def aggregate_uv(u: coo_matrix, v: np.ndarray, spatial_basis: np.ndarray,
-                 temporal_basis: np.ndarray) -> Tuple[coo_matrix, np.ndarray]:
+def aggregate_uv(
+    u: coo_matrix, v: np.ndarray, spatial_basis: np.ndarray, temporal_basis: np.ndarray
+) -> Tuple[coo_matrix, np.ndarray]:
     """
     Aggregates the input matrices U and V with additional spatial and temporal bases.
 
@@ -641,9 +790,7 @@ def aggregate_uv(u: coo_matrix, v: np.ndarray, spatial_basis: np.ndarray,
     return u_net, v_net
 
 
-def get_projector_noprune(u: coo_matrix,
-                          v: np.ndarray,
-                          tol=0.0001):
+def get_projector_noprune(u: coo_matrix, v: np.ndarray, tol=0.0001):
     UtU = u.T.dot(u)
     if u.shape[1] > v.shape[1]:
         right_mat = v
@@ -656,10 +803,10 @@ def get_projector_noprune(u: coo_matrix,
     eig_vals = np.array(eig_vals)
     eig_vecs = np.array(eig_vecs)
 
-    #Now filter any remaining bad components
+    # Now filter any remaining bad components
     good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
 
-    #Apply the eigenvectors to random_mat
+    # Apply the eigenvectors to random_mat
     random_mat_e = np.array(jnp.matmul(right_mat, eig_vecs))
 
     singular_values = np.sqrt(eig_vals)
@@ -671,8 +818,12 @@ def get_projector_noprune(u: coo_matrix,
     return (u, random_mat_e)
 
 
-def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
-                  deterministic: bool = False) -> tuple[coo_matrix, np.ndarray]:
+def get_projector(
+    u: coo_matrix,
+    v: np.ndarray,
+    rank_prune_target: float = 3,
+    deterministic: bool = False,
+) -> tuple[coo_matrix, np.ndarray]:
     """
     This function uses sketching to find an orthonormal subspace which approximately captures the span of UV
     We want to express this subspace as a factorization: UP; this way we can keep the nice sparsity and avoid ever
@@ -699,7 +850,9 @@ def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
 
     if not deterministic:
         if int(u.shape[1] / rank_prune_target) < v.shape[1] and rank_prune_target > 1:
-            random_mat = np.random.normal(0, 1, size=(v.shape[1], int(u.shape[1] / rank_prune_factor)))
+            random_mat = np.random.normal(
+                0, 1, size=(v.shape[1], int(u.shape[1] / rank_prune_factor))
+            )
             random_mat = np.array(jnp.matmul(v, random_mat))
         else:
             random_mat = v
@@ -707,14 +860,16 @@ def get_projector(u: coo_matrix, v: np.ndarray, rank_prune_target: float = 3,
         UtUR = UtU.dot(random_mat)
         RtUtUR = np.array(jnp.matmul(random_mat.T, UtUR))
 
-        eig_vecs, eig_vals, _ = jnp.linalg.svd(RtUtUR, full_matrices=False, hermitian=True)
+        eig_vecs, eig_vals, _ = jnp.linalg.svd(
+            RtUtUR, full_matrices=False, hermitian=True
+        )
         eig_vals = np.array(eig_vals)
         eig_vecs = np.array(eig_vecs)
 
-        #Now filter any remaining bad components
+        # Now filter any remaining bad components
         good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
 
-        #Apply the eigenvectors to random_mat
+        # Apply the eigenvectors to random_mat
         random_mat_e = np.array(jnp.matmul(random_mat, eig_vecs))
 
         singular_values = np.sqrt(eig_vals)
@@ -772,7 +927,11 @@ def rank_prune_svd(mixing_weights, singular_values, temporal_basis, factor=0.25)
         mixing_weights = mixing_weights[:, :index]
         singular_values = singular_values[:index]
         temporal_basis = temporal_basis[:index, :]
-    display("The rank was originally {} now it is {}".format(dimension, mixing_weights.shape[1]))
+    display(
+        "The rank was originally {} now it is {}".format(
+            dimension, mixing_weights.shape[1]
+        )
+    )
     return mixing_weights, singular_values, temporal_basis
 
 
@@ -783,7 +942,7 @@ def factored_svd_debug(spatial_components, temporal_components, factor=0.25):
         spatial_components: scipy.sparse.coo_matrix. Shape (d, R)
         temporal_components: jax.numpy. Shape (R, T)
     """
-    Qt, Lt = jnp.linalg.qr(temporal_components.transpose(), mode='reduced')
+    Qt, Lt = jnp.linalg.qr(temporal_components.transpose(), mode="reduced")
     Sigma = compute_sigma(spatial_components, Lt)
     eig_vecs, eig_vals = eigenvalue_and_eigenvector_routine(Sigma)
     Qt = np.array(Qt)
@@ -798,26 +957,29 @@ def factored_svd_debug(spatial_components, temporal_components, factor=0.25):
     mixing_weights = np.array(jnp.matmul(Lt.T, eig_vecs / singular_values[None, :]))
     temporal_basis = np.array(jnp.matmul(eig_vecs.T, Qt.T))
 
-    #Here we prune the factorized SVD 
-    return rank_prune_svd(mixing_weights, singular_values, temporal_basis, factor=factor)
+    # Here we prune the factorized SVD
+    return rank_prune_svd(
+        mixing_weights, singular_values, temporal_basis, factor=factor
+    )
 
 
-def factored_svd(projection: Union[np.ndarray, jnp.ndarray],
-                 data: Union[np.ndarray, jnp.ndarray]) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def factored_svd(
+    projection: Union[np.ndarray, jnp.ndarray], data: Union[np.ndarray, jnp.ndarray]
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-     Computes Singular Value Decomposition (SVD) of the input data and applies projection accordingly.
+    Computes Singular Value Decomposition (SVD) of the input data and applies projection accordingly.
 
-     Args:
-         projection (Union[np.ndarray, jnp.ndarray]): Projection matrix which multiplies the SVD expression from the
-         left or right.
-         data (Union[np.ndarray, jnp.ndarray]): Input data for SVD computation.
+    Args:
+        projection (Union[np.ndarray, jnp.ndarray]): Projection matrix which multiplies the SVD expression from the
+        left or right.
+        data (Union[np.ndarray, jnp.ndarray]): Input data for SVD computation.
 
-     Returns:
-         tuple: A tuple containing:
-             - jnp.ndarray: Result of the projection applied to the singular vectors.
-             - jnp.ndarray: Singular values obtained from the SVD.
-             - jnp.ndarray: Right singular vector matrix.
-     """
+    Returns:
+        tuple: A tuple containing:
+            - jnp.ndarray: Result of the projection applied to the singular vectors.
+            - jnp.ndarray: Singular values obtained from the SVD.
+            - jnp.ndarray: Right singular vector matrix.
+    """
     d1, d2 = data.shape
     if d1 <= d2:
         display("Short matrix, using leftward SVD routine")
@@ -828,7 +990,9 @@ def factored_svd(projection: Union[np.ndarray, jnp.ndarray],
 
 
 @partial(jit)
-def more_rows_svd_routine(projection: jnp.ndarray, data: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def more_rows_svd_routine(
+    projection: jnp.ndarray, data: jnp.ndarray
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Performs Singular Value Decomposition (SVD) on data routine with additional projection.
 
@@ -846,7 +1010,9 @@ def more_rows_svd_routine(projection: jnp.ndarray, data: jnp.ndarray) -> Tuple[j
     left, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
-    right_singular_matrix = jnp.divide(jnp.matmul(left.transpose(), data), jnp.expand_dims(divisor, 1))
+    right_singular_matrix = jnp.divide(
+        jnp.matmul(left.transpose(), data), jnp.expand_dims(divisor, 1)
+    )
 
     left_projection = jnp.matmul(projection, left)
     return left_projection, singular_values, right_singular_matrix
@@ -855,10 +1021,10 @@ def more_rows_svd_routine(projection: jnp.ndarray, data: jnp.ndarray) -> Tuple[j
 @partial(jit)
 def svd_new_temporal(R: np.ndarray, s: np.ndarray, V: np.ndarray):
     """
-    We have a PMD decomposition in SVD format: (UR)s(V) (left singular vectors, singular values, right singular vectors). 
+    We have a PMD decomposition in SVD format: (UR)s(V) (left singular vectors, singular values, right singular vectors).
     Sometimes we want to apply transformations to V (like high pass filtering or deconvolution)
     This routine takes an updated temporal matrix and computes a fast updated SVD.
-    Given a transformed V, we compute the new singular values and right singular vectors. 
+    Given a transformed V, we compute the new singular values and right singular vectors.
 
     Args:
         R (np.ndarray). Shape (full_rank, pruned_rank). The mixing matrix in URsV
@@ -869,20 +1035,22 @@ def svd_new_temporal(R: np.ndarray, s: np.ndarray, V: np.ndarray):
         singular_values (np.ndarray): Shape (rank,). The new singular values
         right_singular_matrix (np.ndarray): Shape (rank, timepoints). The updated singular values
     """
-    V_combined = s[:, None]*V
+    V_combined = s[:, None] * V
     v_vt = jnp.dot(V_combined, V_combined.T)
     left, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
-    V_new = jnp.divide(jnp.matmul(left.transpose(), V_combined), jnp.expand_dims(divisor, 1))
+    V_new = jnp.divide(
+        jnp.matmul(left.transpose(), V_combined), jnp.expand_dims(divisor, 1)
+    )
 
-    return R@left, singular_values, V_new
- 
+    return R @ left, singular_values, V_new
 
 
 @partial(jit)
-def more_columns_svd_routine(projection: jnp.ndarray,
-                             data: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def more_columns_svd_routine(
+    projection: jnp.ndarray, data: jnp.ndarray
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Performs Singular Value Decomposition (SVD) on data routine with additional projection.
 
