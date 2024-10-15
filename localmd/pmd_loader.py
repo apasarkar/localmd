@@ -25,8 +25,8 @@ def display(msg):
     """
     Printing utility that logs time and flushes.
     """
-    tag = '[' + datetime.datetime.today().strftime('%y-%m-%d %H:%M:%S') + ']: '
-    sys.stdout.write(tag + msg + '\n')
+    tag = "[" + datetime.datetime.today().strftime("%y-%m-%d %H:%M:%S") + "]: "
+    sys.stdout.write(tag + msg + "\n")
     sys.stdout.flush()
 
 
@@ -35,15 +35,18 @@ def make_jax_random_key() -> Array:
     Returns a jax pseudorandom key
     """
     ii32 = np.iinfo(np.int32)
-    prng_input = np.random.randint(low=ii32.min, high=ii32.max, size=1, dtype=np.int32)[0]
+    prng_input = np.random.randint(low=ii32.min, high=ii32.max, size=1, dtype=np.int32)[
+        0
+    ]
     key = jax.random.PRNGKey(prng_input)
 
     return key
 
 
 @partial(jit, static_argnums=(2, 3))
-def truncated_random_svd(input_matrix: ArrayLike, key: ArrayLike, rank: int,
-                         num_oversamples: int = 10) -> tuple[ArrayLike, ArrayLike]:
+def truncated_random_svd(
+    input_matrix: ArrayLike, key: ArrayLike, rank: int, num_oversamples: int = 10
+) -> tuple[ArrayLike, ArrayLike]:
     """
     Key: This function assumes that (1) rank + num_oversamples is less than all
         dimensions of the input_matrix and (2) num_oversmples >= 1
@@ -106,9 +109,17 @@ class FrameDataloader:
 
 
 class PMDLoader:
-    def __init__(self, dataset: lazy_data_loader, dtype='float32', background_rank: int = 15,
-                 batch_size: int = 2000, num_workers: int = None, pixel_batch_size: int = 5000,
-                 num_samples: int = 10, order: str="F"):
+    def __init__(
+        self,
+        dataset: lazy_data_loader,
+        dtype="float32",
+        background_rank: int = 15,
+        batch_size: int = 2000,
+        num_workers: int = None,
+        pixel_batch_size: int = 5000,
+        num_samples: int = 10,
+        order: str = "F",
+    ):
         """
         Args:
             dataset: Object which implements the PMDDataset abstract interface. This is a basic reader which allows us
@@ -139,8 +150,9 @@ class PMDLoader:
         def regular_collate(batch):
             return batch[0]
 
-        self.curr_dataloader = FrameDataloader(self.dataset, self.batch_size,
-                                               dtype=self.dtype)
+        self.curr_dataloader = FrameDataloader(
+            self.dataset, self.batch_size, dtype=self.dtype
+        )
 
         if num_workers is None:
             num_cpu = multiprocessing.cpu_count()
@@ -148,9 +160,14 @@ class PMDLoader:
             num_workers = max(num_workers, 0)
         display("num workers for each dataloader is {}".format(num_workers))
 
-        self.loader = torch.utils.data.DataLoader(self.curr_dataloader, batch_size=1,
-                                                  shuffle=False, num_workers=num_workers, collate_fn=regular_collate,
-                                                  timeout=0)
+        self.loader = torch.utils.data.DataLoader(
+            self.curr_dataloader,
+            batch_size=1,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=regular_collate,
+            timeout=0,
+        )
 
         self.background_rank = background_rank
         self.frame_constant = 1024
@@ -191,7 +208,9 @@ class PMDLoader:
         same time
         """
         if self.shape[0] < min_allowed_frames:
-            raise ValueError("Data does not have enough frames for noise estimation procedure")
+            raise ValueError(
+                "Data does not have enough frames for noise estimation procedure"
+            )
 
         display("Calculating mean and noise variance")
         overall_mean = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
@@ -202,13 +221,17 @@ class PMDLoader:
             dim1_range_start_pts = np.arange(1)
         else:
             dim1_range_start_pts = np.arange(0, self.shape[1] - divisor, divisor)
-            dim1_range_start_pts = np.concatenate([dim1_range_start_pts, [self.shape[1] - divisor]], axis=0)
+            dim1_range_start_pts = np.concatenate(
+                [dim1_range_start_pts, [self.shape[1] - divisor]], axis=0
+            )
 
         if self.shape[2] - divisor <= 0:
             dim2_range_start_pts = np.arange(1)
         else:
             dim2_range_start_pts = np.arange(0, self.shape[2] - divisor, divisor)
-            dim2_range_start_pts = np.concatenate([dim2_range_start_pts, [self.shape[2] - divisor]], axis=0)
+            dim2_range_start_pts = np.concatenate(
+                [dim2_range_start_pts, [self.shape[2] - divisor]], axis=0
+            )
 
         elts_used = list(range(0, self.shape[0], self.frame_constant))
 
@@ -216,7 +239,9 @@ class PMDLoader:
         for i in elts_used:
             start_pt_frame = i
             end_pt_frame = min(i + self.frame_constant, self.shape[0])
-            data = np.array(self.temporal_crop([i for i in range(start_pt_frame, end_pt_frame)]))
+            data = np.array(
+                self.temporal_crop([i for i in range(start_pt_frame, end_pt_frame)])
+            )
 
             data = np.array(data)
             mean_value_net = np.zeros((self.shape[1], self.shape[2]))
@@ -225,19 +250,29 @@ class PMDLoader:
                 elts_for_var_est += 1
             for step1 in dim1_range_start_pts:
                 for step2 in dim2_range_start_pts:
-                    crop_data = data[step1:step1 + divisor, step2:step2 + divisor, :]
+                    crop_data = data[
+                        step1 : step1 + divisor, step2 : step2 + divisor, :
+                    ]
                     if crop_data.shape[2] >= min_allowed_frames:
-                        mean_value, noise_est_2d = get_mean_and_noise(crop_data, self.shape[0])
-                        mean_value_net[step1:step1 + divisor, step2:step2 + divisor] = np.array(mean_value)
-                        normalizer_net[step1:step1 + divisor, step2:step2 + divisor] = np.array(noise_est_2d)
+                        mean_value, noise_est_2d = get_mean_and_noise(
+                            crop_data, self.shape[0]
+                        )
+                        mean_value_net[
+                            step1 : step1 + divisor, step2 : step2 + divisor
+                        ] = np.array(mean_value)
+                        normalizer_net[
+                            step1 : step1 + divisor, step2 : step2 + divisor
+                        ] = np.array(noise_est_2d)
                     else:
                         mean_value = get_mean_chunk(crop_data, self.shape[0])
-                        mean_value_net[step1:step1 + divisor, step2:step2 + divisor] = np.array(mean_value)
+                        mean_value_net[
+                            step1 : step1 + divisor, step2 : step2 + divisor
+                        ] = np.array(mean_value)
 
             overall_mean += mean_value_net
-            overall_normalizer += (normalizer_net / len(elts_used))
+            overall_normalizer += normalizer_net / len(elts_used)
         if elts_for_var_est != 0:
-            overall_normalizer *= (len(elts_used) / elts_for_var_est)
+            overall_normalizer *= len(elts_used) / elts_for_var_est
         overall_normalizer[overall_normalizer == 0] = 1
         display("Finished mean and noise variance")
         return overall_mean, overall_normalizer
@@ -253,11 +288,16 @@ class PMDLoader:
         if self.background_rank <= 0:
             return np.zeros((self.shape[1] * self.shape[2], 1)).astype(self.dtype)
         sample_list = [i for i in range(0, self.shape[0])]
-        random_data = np.random.choice(sample_list, replace=False, size=min(n_samples, self.shape[0])).tolist()
+        random_data = np.random.choice(
+            sample_list, replace=False, size=min(n_samples, self.shape[0])
+        ).tolist()
         crop_data = self.temporal_crop_standardized(random_data)
         key = make_jax_random_key()
-        spatial_basis, _ = truncated_random_svd(crop_data.reshape((-1, crop_data.shape[-1]), order=self.order), key,
-                                                self.background_rank)
+        spatial_basis, _ = truncated_random_svd(
+            crop_data.reshape((-1, crop_data.shape[-1]), order=self.order),
+            key,
+            self.background_rank,
+        )
         return np.array(spatial_basis).astype(self.dtype)
 
     def v_projection(self, u: coo_matrix, inv_term: np.ndarray):
@@ -278,8 +318,14 @@ class PMDLoader:
 
         result_list = []
         for i, data in enumerate(tqdm(self.loader), 0):
-            output = v_projection_routine(self.order, inv_term, sparse_projection_term, data,
-                                          mean_img_r, std_img_r)
+            output = v_projection_routine(
+                self.order,
+                inv_term,
+                sparse_projection_term,
+                data,
+                mean_img_r,
+                std_img_r,
+            )
 
             result_list.append(output)
         result = np.array(jnp.concatenate(result_list, axis=1))
@@ -288,17 +334,22 @@ class PMDLoader:
 
     def temporal_crop_with_filter(self, frames):
         crop_data = self.temporal_crop(frames)
-        spatial_basis_r = self.spatial_basis.reshape((self.shape[1], self.shape[2], -1), order=self.order)
+        spatial_basis_r = self.spatial_basis.reshape(
+            (self.shape[1], self.shape[2], -1), order=self.order
+        )
 
-        output_matrix = np.zeros((crop_data.shape[0], crop_data.shape[1], crop_data.shape[2]))
+        output_matrix = np.zeros(
+            (crop_data.shape[0], crop_data.shape[1], crop_data.shape[2])
+        )
         temporal_basis = np.zeros((spatial_basis_r.shape[2], crop_data.shape[2]))
         num_iters = math.ceil(output_matrix.shape[2] / self.batch_size)
         start = 0
         for k in range(num_iters):
             end_pt = min(crop_data.shape[2], start + self.batch_size)
             crop_data_subset = crop_data[:, :, start:end_pt]
-            filter_data, temporal_basis_crop = standardize_and_filter(crop_data_subset, self.mean_img, self.std_img,
-                                                                      spatial_basis_r)
+            filter_data, temporal_basis_crop = standardize_and_filter(
+                crop_data_subset, self.mean_img, self.std_img, spatial_basis_r
+            )
             filter_data = np.array(filter_data)
             temporal_basis_crop = np.array(temporal_basis_crop)
             output_matrix[:, :, start:end_pt] = filter_data
@@ -315,7 +366,9 @@ def standardize_and_filter(new_data, mean_img, std_img, spatial_basis):
     d1, d2, t = new_data.shape
 
     new_data = jnp.reshape(new_data, (d1 * d2, new_data.shape[2]), order="F")
-    spatial_basis = jnp.reshape(spatial_basis, (d1 * d2, spatial_basis.shape[2]), order="F")
+    spatial_basis = jnp.reshape(
+        spatial_basis, (d1 * d2, spatial_basis.shape[2]), order="F"
+    )
 
     temporal_projection = jnp.matmul(spatial_basis.T, new_data)
     new_data = new_data - jnp.matmul(spatial_basis, temporal_projection)

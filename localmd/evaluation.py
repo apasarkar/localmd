@@ -57,24 +57,15 @@ def total_variation_stat(img: ArrayLike) -> Array:
     Returns:
         (Array): The total variation statistic for the input image.
     """
-    center = jax.lax.dynamic_slice(img, (1, 1),
-                                   (img.shape[0] - 2, img.shape[1] - 2))
-    c00 = jax.lax.dynamic_slice(img, (0, 0),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c10 = jax.lax.dynamic_slice(img, (1, 0),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c20 = jax.lax.dynamic_slice(img, (2, 0),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c21 = jax.lax.dynamic_slice(img, (2, 1),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c22 = jax.lax.dynamic_slice(img, (2, 2),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c12 = jax.lax.dynamic_slice(img, (1, 2),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c02 = jax.lax.dynamic_slice(img, (0, 2),
-                                (img.shape[0] - 2, img.shape[1] - 2))
-    c01 = jax.lax.dynamic_slice(img, (0, 1),
-                                (img.shape[0] - 2, img.shape[1] - 2))
+    center = jax.lax.dynamic_slice(img, (1, 1), (img.shape[0] - 2, img.shape[1] - 2))
+    c00 = jax.lax.dynamic_slice(img, (0, 0), (img.shape[0] - 2, img.shape[1] - 2))
+    c10 = jax.lax.dynamic_slice(img, (1, 0), (img.shape[0] - 2, img.shape[1] - 2))
+    c20 = jax.lax.dynamic_slice(img, (2, 0), (img.shape[0] - 2, img.shape[1] - 2))
+    c21 = jax.lax.dynamic_slice(img, (2, 1), (img.shape[0] - 2, img.shape[1] - 2))
+    c22 = jax.lax.dynamic_slice(img, (2, 2), (img.shape[0] - 2, img.shape[1] - 2))
+    c12 = jax.lax.dynamic_slice(img, (1, 2), (img.shape[0] - 2, img.shape[1] - 2))
+    c02 = jax.lax.dynamic_slice(img, (0, 2), (img.shape[0] - 2, img.shape[1] - 2))
+    c01 = jax.lax.dynamic_slice(img, (0, 1), (img.shape[0] - 2, img.shape[1] - 2))
 
     accumulator = jnp.zeros_like(center)
 
@@ -111,7 +102,9 @@ def spatial_roughness_stat(u: ArrayLike) -> Array:
 
     horizontal_difference = jnp.abs(left_horizontal - right_horizontal)
     avg_diff = (jnp.sum(vert_diffs) + jnp.sum(horizontal_difference)) / (
-            vert_diffs.shape[0] * vert_diffs.shape[1] + horizontal_difference.shape[0] * horizontal_difference.shape[1])
+        vert_diffs.shape[0] * vert_diffs.shape[1]
+        + horizontal_difference.shape[0] * horizontal_difference.shape[1]
+    )
 
     avg_elem = jnp.mean(jnp.abs(u))
 
@@ -137,8 +130,12 @@ spatial_roughness_stat_vmap = vmap(spatial_roughness_stat, in_axes=(2))
 temporal_roughness_stat_vmap = vmap(temporal_roughness_stat, in_axes=(0))
 
 
-def evaluate_fitness(img: ArrayLike, trace: ArrayLike, spatial_threshold: Union[float, ArrayLike],
-                     temporal_threshold: Union[float, ArrayLike]) -> Array:
+def evaluate_fitness(
+    img: ArrayLike,
+    trace: ArrayLike,
+    spatial_threshold: Union[float, ArrayLike],
+    temporal_threshold: Union[float, ArrayLike],
+) -> Array:
     """
     Evaluates the fitness of an image-trace pair based on spatial and temporal thresholds.
 
@@ -167,9 +164,12 @@ def evaluate_fitness(img: ArrayLike, trace: ArrayLike, spatial_threshold: Union[
 evaluate_fitness_vmap = vmap(evaluate_fitness, in_axes=(2, 1, None, None))
 
 
-def construct_final_fitness_decision(images: ArrayLike,
-                                     traces: ArrayLike, spatial_threshold: Union[float, ArrayLike],
-                                     temporal_threshold: Union[float, ArrayLike]) -> Array:
+def construct_final_fitness_decision(
+    images: ArrayLike,
+    traces: ArrayLike,
+    spatial_threshold: Union[float, ArrayLike],
+    temporal_threshold: Union[float, ArrayLike],
+) -> Array:
     """
     Constructs the final fitness decision for a batch of image-trace pairs based on spatial and temporal thresholds.
 
@@ -186,11 +186,15 @@ def construct_final_fitness_decision(images: ArrayLike,
             Returns 1 if both spatial and temporal conditions are met for a pair, otherwise returns 0.
     """
 
-    output = evaluate_fitness_vmap(images, traces, spatial_threshold, temporal_threshold)
+    output = evaluate_fitness_vmap(
+        images, traces, spatial_threshold, temporal_threshold
+    )
     return output
 
 
-def filter_by_failures(decisions: np.ndarray, max_consecutive_failures: int) -> np.ndarray:
+def filter_by_failures(
+    decisions: np.ndarray, max_consecutive_failures: int
+) -> np.ndarray:
     """
     Filters decisions based on maximum consecutive failures.
 

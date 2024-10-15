@@ -5,14 +5,22 @@ from scipy.sparse import coo_matrix
 
 
 class PMDArray:
-    def __init__(self, U: coo_matrix, R: np.ndarray, s: np.ndarray,
-                 V: np.ndarray, data_shape: tuple[int, int, int], data_order: str, mean_img: np.ndarray,
-                 std_img: np.ndarray):
+    def __init__(
+        self,
+        U: coo_matrix,
+        R: np.ndarray,
+        s: np.ndarray,
+        V: np.ndarray,
+        data_shape: tuple[int, int, int],
+        data_order: str,
+        mean_img: np.ndarray,
+        std_img: np.ndarray,
+    ):
         """
         This is a class that allows you to use the PMD output representation of the movie in an "array-like" manner.
         Critically, this class implements the __getitem__ functionality allowing you to index the data, etc.
         which allows you to efficiently slice frames and spatial subsets of the data.
-        
+
         Args:
             U (scipy.sparse._coo.coo_matrix): Dimensions (d, K1), where K1 is larger than the estimated rank of the data.
                 Sparse spatial basis matrix for PMD decomposition.
@@ -43,7 +51,9 @@ class PMDArray:
         self._RsV = (R * s[None, :]).dot(V)  # Fewer computations when doing __getitem__
         self.mean_img = mean_img
         self.var_img = std_img
-        self.row_indices = np.arange(self.d1 * self.d2).reshape((self.d1, self.d2), order=self.order)
+        self.row_indices = np.arange(self.d1 * self.d2).reshape(
+            (self.d1, self.d2), order=self.order
+        )
 
     @property
     def dtype(self):
@@ -65,7 +75,9 @@ class PMDArray:
         else:
             return elt
 
-    def spatial_crop(self, key) -> tuple[scipy.sparse.csr_matrix, np.ndarray, np.ndarray, tuple]:
+    def spatial_crop(
+        self, key
+    ) -> tuple[scipy.sparse.csr_matrix, np.ndarray, np.ndarray, tuple]:
         """
 
         Args:
@@ -109,24 +121,33 @@ class PMDArray:
 
         if len(key) == 1:
             spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(
-                (slice(None, None, None), slice(None, None, None)))
+                (slice(None, None, None), slice(None, None, None))
+            )
             temporal = self.temporal_crop(key[0])
         elif len(key) == 2:
-            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(key[1], slice(None, None, None))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(
+                key[1], slice(None, None, None)
+            )
             temporal = self.temporal_crop(key[0])
         elif len(key) == 3:
-            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop((key[1], key[2]))
+            spatial, mean_used, var_used, implied_fov_dims = self.spatial_crop(
+                (key[1], key[2])
+            )
             temporal = self.temporal_crop(key[0])
         else:
             raise ValueError("Too many values to unpack in __getitem__")
 
         # Get the unnormalized outputs
         output = spatial.dot(temporal)
-        output = (output.reshape(implied_fov_dims + (-1,), order=self.order) *
-                  np.expand_dims(var_used, axis=len(var_used.shape)) +
-                  np.expand_dims(mean_used, axis=len(mean_used.shape)))
+        output = output.reshape(
+            implied_fov_dims + (-1,), order=self.order
+        ) * np.expand_dims(var_used, axis=len(var_used.shape)) + np.expand_dims(
+            mean_used, axis=len(mean_used.shape)
+        )
 
         # Return with the frames as the first dimension
-        output = np.transpose(output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1)))
+        output = np.transpose(
+            output, axes=(len(output.shape) - 1, *range(len(output.shape) - 1))
+        )
 
         return output.squeeze().astype(self.dtype)
