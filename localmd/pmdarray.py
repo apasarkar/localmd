@@ -47,7 +47,9 @@ class PMDArray:
         self._r = r
         self._s = s
         self._v = v
-        self._combined_temporal = (self.r * self.s[None, :]).dot(self.v)  # Fewer computations when doing __getitem__
+        self._combined_temporal = (self.r * self.s[None, :]).dot(
+            self.v
+        )  # Fewer computations when doing __getitem__
         self.mean_img = mean_img
         self.var_img = std_img
         self.row_indices = np.arange(self.fov_dim1 * self.fov_dim2).reshape(
