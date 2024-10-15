@@ -728,16 +728,16 @@ def localmd_decomposition(
     normalizing_weights = diags([(1 / weight_normalization_diag).ravel()], [0])
     u_r = normalizing_weights.dot(u_r)
 
-    u_r, v_cropped = aggregate_uv(
+    u_r, v_cropped = aggregate_local_and_global_decomposition(
         u_r, v_cropped, load_obj.spatial_basis, temporal_basis_crop
     )
     display("The total rank before pruning is {}".format(u_r.shape[1]))
 
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
     if rank_prune:
-        u_r, p = get_projector(u_r, v_cropped)
+        u_r, p = compute_pruned_orthogonal_spatial_basis(u_r, v_cropped)
     else:
-        u_r, p = get_projector_noprune(u_r, v_cropped)
+        u_r, p = compute_full_orthogonal_spatial_basis(u_r, v_cropped)
     display(
         "After performing rank reduction, the updated rank is {}".format(p.shape[1])
     )
@@ -766,7 +766,7 @@ def localmd_decomposition(
     return final_movie
 
 
-def aggregate_uv(
+def aggregate_local_and_global_decomposition(
     u: coo_matrix, v: np.ndarray, spatial_basis: np.ndarray, temporal_basis: np.ndarray
 ) -> Tuple[coo_matrix, np.ndarray]:
     """
@@ -790,7 +790,7 @@ def aggregate_uv(
     return u_net, v_net
 
 
-def get_projector_noprune(u: coo_matrix, v: np.ndarray, tol=0.0001):
+def compute_full_orthogonal_spatial_basis(u: coo_matrix, v: np.ndarray, tol=0.0001):
     UtU = u.T.dot(u)
     if u.shape[1] > v.shape[1]:
         right_mat = v
@@ -818,7 +818,7 @@ def get_projector_noprune(u: coo_matrix, v: np.ndarray, tol=0.0001):
     return (u, random_mat_e)
 
 
-def get_projector(
+def compute_pruned_orthogonal_spatial_basis(
     u: coo_matrix,
     v: np.ndarray,
     rank_prune_target: float = 3,
