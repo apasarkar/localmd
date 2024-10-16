@@ -768,7 +768,7 @@ def localmd_decomposition(
 
     ## Step 2h: Do a SVD Reformat given u and v
     display("Final reformat of data into complete SVD")
-    r, s, vt = factored_svd(p, v)
+    r, s, vt = projected_svd(p, v)
     r = np.array(r)
     s = np.array(s)
     vt = np.array(vt)
@@ -874,7 +874,7 @@ def compute_lowrank_factorized_svd(
         P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU)
         """
         new_temporal = jnp.matmul(spatial_mixing_matrix.T, (ut_u.dot(v)))
-        spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(
+        spatial_mixing_matrix, singular_values, right_singular_vectors = projected_svd(
             spatial_mixing_matrix, new_temporal
         )
         return spatial_mixing_matrix, singular_values, right_singular_vectors
@@ -957,113 +957,116 @@ def factored_svd_debug(spatial_components, temporal_components, factor=0.25):
     )
 
 
-def factored_svd(
+def projected_svd(
     projection: Union[np.ndarray, jnp.ndarray], data: Union[np.ndarray, jnp.ndarray]
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-    Computes Singular Value Decomposition (SVD) of the input data and applies projection accordingly.
+    Computes the Singular Value Decomposition (SVD) of the input `data` and applies a `projection` to the left singular vectors.
+
+    This function performs two key operations:
+    1. Computes the partial SVD of the input `data`, yielding the left singular vectors, singular values, and right singular vectors.
+    2. Multiplies the `projection` matrix with the computed left singular vectors, resulting in a new set of left vectors, while retaining the singular values and right singular vectors.
+
+    ### Application in PMD
+    In the context of PMD, data is often factorized as `U @ P @ V`, where `U @ P` forms an orthonormal basis with `U` being sparse.
+    To convert this factorization into a full singular value decomposition while preserving the sparsity of `U`, we apply this function.
+    Specifically, calling `R, s, V_new = projected_svd(P, V)` produces the decomposition `(U @ R) * s * (V_new)`, which is the SVD of `U @ P @ V`.
 
     Args:
-        projection (Union[np.ndarray, jnp.ndarray]): Projection matrix which multiplies the SVD expression from the
-        left or right.
-        data (Union[np.ndarray, jnp.ndarray]): Input data for SVD computation.
+        projection (Union[np.ndarray, jnp.ndarray]): The projection matrix, typically `P`, applied to the left singular vectors after the SVD. Its shape should be compatible for multiplication with the left singular vectors obtained from `data`.
+        data (Union[np.ndarray, jnp.ndarray]): The input data matrix on which the SVD is computed. It could be a dense or sparse matrix.
 
     Returns:
-        tuple: A tuple containing:
-            - jnp.ndarray: Result of the projection applied to the singular vectors.
-            - jnp.ndarray: Singular values obtained from the SVD.
-            - jnp.ndarray: Right singular vector matrix.
+        Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            - **projected_left_vectors** (jnp.ndarray): The result of `projection @ left_vectors` from the partial SVD of `data`. These vectors represent the new left singular vectors after applying the projection.
+            - **singular_values** (jnp.ndarray): The singular values from the SVD of `data`.
+            - **right_singular_vectors** (jnp.ndarray): The right singular vectors from the SVD of `data`, representing the orthonormal basis for the column space of `data`.
+
+    Notes:
+        - This function is particularly useful in situations where a factorization needs to be converted to a full SVD, but maintaining the structure or sparsity of one factor is important.
+        - The `projection` matrix allows applying transformations to the left singular vectors without modifying the singular values or right singular vectors.
     """
     d1, d2 = data.shape
     if d1 <= d2:
         display("Short matrix, using leftward SVD routine")
-        return more_rows_svd_routine(projection, data)
+        left_singular_vectors, singular_values, right_singular_vectors = fewer_rows_svd_routine(data)
+        left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
     else:
         display("Tall matrix, using rightward SVD routine")
-        return more_columns_svd_routine(projection, data)
+        left_singular_vectors, singular_values, right_singular_vectors = fewer_columns_svd_routine(data)
+        left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
+
+    return left_singular_vectors, singular_values, right_singular_vectors
 
 
 @partial(jit)
-def more_rows_svd_routine(
-    projection: jnp.ndarray, data: jnp.ndarray
+def fewer_rows_svd_routine(
+    data: jnp.ndarray
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-    Performs Singular Value Decomposition (SVD) on data routine with additional projection.
+    Computes the Singular Value Decomposition (SVD) for a matrix with more rows than columns
+
+    This function leverages the fact that when a matrix has more rows than columns,
+    it is computationally more efficient to perform the SVD on the smaller matrix
+    (data @ data.T), rather than the original matrix.
+    It returns the left singular vectors, singular values, and right singular vectors of the original matrix.
 
     Args:
-        projection (jnp.ndarray): Projection matrix which multiplies the SVD expression from the left.
-        data (jnp.ndarray): (x, y)-shaped data, where x > y.
+        data (jnp.ndarray): A 2D input array with shape (x, y), where x (rows) > y (columns).
+            This represents a matrix with more rows than columns, i.e., where the number
+            of samples is larger than the number of features.
 
     Returns:
-        tuple: A tuple containing:
-            - jnp.ndarray: Result of the projection applied to the left singular vectors.
-            - jnp.ndarray: Singular values obtained from the SVD.
-            - jnp.ndarray: Right singular vector matrix
+        Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            - jnp.ndarray: Left singular vectors, of shape (x, y). These form an orthonormal
+              basis for the row space of the data.
+            - jnp.ndarray: Singular values, of shape (y,). These are the square roots of the
+              eigenvalues of (data @ data.T).
+            - jnp.ndarray: Right singular vectors, of shape (y, y), representing the basis vectors
+              for the original feature space.
     """
     v_vt = jnp.matmul(data, data.transpose())
-    left, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
+    left_singular_vectors, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
     right_singular_matrix = jnp.divide(
-        jnp.matmul(left.transpose(), data), jnp.expand_dims(divisor, 1)
+        jnp.matmul(left_singular_vectors.transpose(), data), jnp.expand_dims(divisor, 1)
     )
 
-    left_projection = jnp.matmul(projection, left)
-    return left_projection, singular_values, right_singular_matrix
+    return left_singular_vectors, singular_values, right_singular_matrix
 
 
 @partial(jit)
-def svd_new_temporal(R: np.ndarray, s: np.ndarray, V: np.ndarray):
-    """
-    We have a PMD decomposition in SVD format: (UR)s(V) (left singular vectors, singular values, right singular vectors).
-    Sometimes we want to apply transformations to V (like high pass filtering or deconvolution)
-    This routine takes an updated temporal matrix and computes a fast updated SVD.
-    Given a transformed V, we compute the new singular values and right singular vectors.
-
-    Args:
-        R (np.ndarray). Shape (full_rank, pruned_rank). The mixing matrix in URsV
-        s (np.ndarray): Shape (pruned_rank,). The current singular values
-        V_new (np.ndarray): Shape (pruned_rank, timepoints). The updated rank of the data
-    Returns:
-        mixing_matrix (np.ndarray). The new "R" in the URsV decomposition
-        singular_values (np.ndarray): Shape (rank,). The new singular values
-        right_singular_matrix (np.ndarray): Shape (rank, timepoints). The updated singular values
-    """
-    V_combined = s[:, None] * V
-    v_vt = jnp.dot(V_combined, V_combined.T)
-    left, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
-    singular_values = jnp.sqrt(vals)
-    divisor = jnp.where(singular_values == 0, 1, singular_values)
-    V_new = jnp.divide(
-        jnp.matmul(left.transpose(), V_combined), jnp.expand_dims(divisor, 1)
-    )
-
-    return R @ left, singular_values, V_new
-
-
-@partial(jit)
-def more_columns_svd_routine(
-    projection: jnp.ndarray, data: jnp.ndarray
+def fewer_columns_svd_routine(
+    data: jnp.ndarray
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-    Performs Singular Value Decomposition (SVD) on data routine with additional projection.
+    Computes the Singular Value Decomposition (SVD) for a matrix with more columns than rows
+
+    This function takes advantage of the fact that for matrices with more columns than rows,
+    it is computationally cheaper to perform the SVD on the Gram matrix (data.T @ data)
+    rather than the full matrix. It returns the left singular vectors, singular values,
+    and right singular vectors of the original matrix.
 
     Args:
-        projection (jnp.ndarray): Projection matrix which multiplies the SVD expression from the left.
-        data (jnp.ndarray): (x, y)-shaped data, where x < y.
+        data (jnp.ndarray): A 2D input array with shape (x, y), where x (rows) < y (columns).
+            This represents a matrix with fewer rows than columns.
 
     Returns:
-        tuple: A tuple containing:
-            - jnp.ndarray: Result of the projection applied to the left singular vectors.
-            - jnp.ndarray: Singular values obtained from the SVD.
-            - jnp.ndarray: Right singular vector matrix
+        Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            - jnp.ndarray: Left singular vectors, of shape (x, x). These are the projection
+              of the input data onto the left singular basis.
+            - jnp.ndarray: Singular values, of shape (x,). These are the square roots of the
+              eigenvalues of (data.T @ data).
+            - jnp.ndarray: Right singular vectors, of shape (y, x), which form the basis in
+              the original column space of the data.
     """
+
     vt_v = jnp.matmul(data.transpose(), data)
     right_t, vals, _ = jnp.linalg.svd(vt_v, full_matrices=False, hermitian=True)
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
 
-    left = jnp.matmul(data, jnp.divide(right_t, jnp.expand_dims(divisor, axis=0)))
-    left_projection = jnp.matmul(projection, left)
+    left_singular_vectors = jnp.matmul(data, jnp.divide(right_t, jnp.expand_dims(divisor, axis=0)))
 
-    return left_projection, singular_values, right_t.transpose()
+    return left_singular_vectors, singular_values, right_t.transpose()
