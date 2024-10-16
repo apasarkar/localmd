@@ -377,15 +377,21 @@ def standardize_and_filter(new_data, mean_img, std_img, spatial_basis):
 
 
 @partial(jit, static_argnums=(0))
-def v_projection_routine(order, dense_projection_term, sparse_projection_term, data, mean_img_r, std_img_r):
+def v_projection_routine(
+    order, dense_projection_term, sparse_projection_term, data, mean_img_r, std_img_r
+):
     data = jnp.reshape(data, (-1, data.shape[2]), order=order)
     centered_data = (data - mean_img_r) / std_img_r
-    output = v_projection_inner_loop(dense_projection_term, sparse_projection_term, centered_data)
+    output = v_projection_inner_loop(
+        dense_projection_term, sparse_projection_term, centered_data
+    )
     return output
 
 
 # @sparse.sparsify
-def v_projection_inner_loop(dense_projector: ArrayLike, sparse_projector: ArrayLike, data: ArrayLike) -> Array:
+def v_projection_inner_loop(
+    dense_projector: ArrayLike, sparse_projector: ArrayLike, data: ArrayLike
+) -> Array:
     """
     Inner loop of V projection step
     """
