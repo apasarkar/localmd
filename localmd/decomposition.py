@@ -545,10 +545,10 @@ def localmd_decomposition(
     pixel_batch_size: int = 5000,
     max_consecutive_failures=1,
     rank_prune: bool = False,
+    rank_prune_factor: float = 0.33,
     temporal_avg_factor: int = 10,
     order: str = "F",
 ):
-
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(
         dataset_obj,
@@ -735,7 +735,16 @@ def localmd_decomposition(
 
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
     if rank_prune:
-        u_r, p = compute_pruned_orthogonal_spatial_basis(u_r, v_cropped)
+
+        if rank_prune_factor <= 0 or rank_prune_factor > 1:
+            raise ValueError("Rank prune factor should be a value in the interval (0, 1]")
+
+        min_dimension = min(u_r.shape[1], v_cropped.shape[1])
+        random_mat = np.random.normal(
+            0, 1, size=(v_cropped.shape[1], int(min_dimension * rank_prune_factor))
+        )
+        temporal_mat_to_reformat = np.array(jnp.matmul(v_cropped, random_mat))
+        p = compute_lowrank_factorized_svd(u_r, temporal_mat_to_reformat, only_left=True)
     else:
         p = compute_lowrank_factorized_svd(u_r, v_cropped, only_left=True)
     display(
@@ -858,78 +867,9 @@ def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray, only_left:bool=
     if only_left:
         return spatial_mixing_matrix
     else:
-        new_temporal = spatial_mixing_matrix.T @ (ut_u.dot(v))
+        new_temporal = jnp.matmul(spatial_mixing_matrix.T , (ut_u.dot(v)))
         spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(spatial_mixing_matrix, new_temporal)
         return spatial_mixing_matrix, singular_values, right_singular_vectors
-
-
-def compute_pruned_orthogonal_spatial_basis(
-    u: coo_matrix,
-    v: np.ndarray,
-    rank_prune_target: float = 3,
-    deterministic: bool = False,
-) -> tuple[coo_matrix, np.ndarray]:
-    """
-    This function uses sketching to find an orthonormal subspace which approximately captures the span of UV
-    We want to express this subspace as a factorization: UP; this way we can keep the nice sparsity and avoid ever
-    dealing with dense d x K (for any K) matrices (where d = number of pixels in movie).
-
-    Due to the overcomplete blockwise decomposition of PMD, we want to prune the rank of the PMD decomposition (U) by a
-     factor of 4. We do this before regressing the entire movie onto the PMD object for memory and computational
-      purposes (faster regression, more efficient GPU utilization).
-
-    Args:
-        u: scipy.sparse.coo_matrix matrix of dimensions (d, R) where d is number of pixels, R is number of frames
-        v (np.ndarray). Shape (R, T) where T is num frames
-        rank_prune_target (float): The fraction R which we want to keep
-        deterministic (boolean): Whether we want to avoid rank pruning and just do a deterministic SVD.
-
-    Returns:
-        tuple[scipy.sparse.coo_matrix, np.ndarray]
-            - u (the same input described above)
-            - the matrix P described above.
-    """
-    rank_prune_factor = rank_prune_target / 1.05
-    tol = 0.0001
-    keep_value = min(int(u.shape[1] / rank_prune_target), v.shape[1])
-
-    if not deterministic:
-        if int(u.shape[1] / rank_prune_target) < v.shape[1] and rank_prune_target > 1:
-            random_mat = np.random.normal(
-                0, 1, size=(v.shape[1], int(u.shape[1] / rank_prune_factor))
-            )
-            random_mat = np.array(jnp.matmul(v, random_mat))
-        else:
-            random_mat = v
-        UtU = u.T.dot(u)
-        UtUR = UtU.dot(random_mat)
-        RtUtUR = np.array(jnp.matmul(random_mat.T, UtUR))
-
-        eig_vecs, eig_vals, _ = jnp.linalg.svd(
-            RtUtUR, full_matrices=False, hermitian=True
-        )
-        eig_vals = np.array(eig_vals)
-        eig_vecs = np.array(eig_vecs)
-
-        # Now filter any remaining bad components
-        good_components = np.logical_and(np.abs(eig_vals) > tol, eig_vals > 0)
-
-        # Apply the eigenvectors to random_mat
-        random_mat_e = np.array(jnp.matmul(random_mat, eig_vecs))
-
-        singular_values = np.sqrt(eig_vals)
-
-        random_mat_e = random_mat_e / singular_values[None, :]
-
-        random_mat_e = random_mat_e[:, good_components]
-        random_mat_e = random_mat_e[:, :keep_value]
-        return u, random_mat_e
-
-    else:
-        display("For Reference purposes only: DETERMINISTIC")
-        r, s, _ = factored_svd_debug(u, v, factor=0.5)
-        return u, r
-
 
 def eigenvalue_and_eigenvector_routine(sigma):
     eig_vals, eig_vecs = jnp.linalg.eigh(sigma)  # Note: eig vals/vecs ascending
