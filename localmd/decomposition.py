@@ -737,7 +737,7 @@ def localmd_decomposition(
     if rank_prune:
         u_r, p = compute_pruned_orthogonal_spatial_basis(u_r, v_cropped)
     else:
-        u_r, p, _, _ = compute_lowrank_factorized_svd(u_r, v_cropped)
+        p = compute_lowrank_factorized_svd(u_r, v_cropped, only_left=True)
     display(
         "After performing rank reduction, the updated rank is {}".format(p.shape[1])
     )
@@ -790,21 +790,41 @@ def aggregate_local_and_global_decomposition(
     return u_net, v_net
 
 
-def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray):
+def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray, only_left:bool=False):
     """
-    Given a low-rank factorization of a matrix: Data = u @ v, where u is sparse,
-    this routine efficiently computes the factorized singular value decomposition of u @ v
+    Compute the factorized Singular Value Decomposition (SVD) of a low-rank matrix factorization.
+
+    This function computes the SVD of a matrix `u @ v`, where `u` is sparse and `v` is dense,
+    both representing a low-rank factorization. It efficiently computes a reduced or partial SVD
+    based on this factorization. The function allows returning just the left singular vectors
+    (spatial mixing matrix) if specified.
 
     Args:
-        u (scipy.sparse.coo_matrix): shape (pixels, low rank): sparse left matrix of low rank factorization
-        v (numpy.ndarray): shape (low rank, frames): dense right matrix of low rank factorization
-    Returns:
-        u (scipy.sparse.coo_matrix): the spatial matrix
-        r (np.ndarray): the spatial mixing matrix (u.dot(r) forms the left singular vectors)
-        s (np.ndarray): 1d diagonal vector of singular values
-        v (np.ndarray): the right singular vectors
+        u (scipy.sparse.coo_matrix):
+            Sparse left matrix of the factorization with shape `(pixels, low_rank)`.
+        v (np.ndarray):
+            Dense right matrix of the factorization with shape `(low_rank, frames)`.
+        only_left (bool, optional):
+            If `True`, only the left singular vectors (spatial mixing matrix) are returned.
+            Defaults to `False`.
 
-    Together, (u@r)@np.diag(s)@v gives the singular value decomposition
+    Returns:
+        np.ndarray:
+            `spatial_mixing_matrix`: An orthonormal column basis for the factorization `u @ v`.
+            This matrix represents the spatial components of the original data.
+
+        If `only_left` is False, it also returns:
+        np.ndarray:
+            `singular_values`: 1D vector of singular values, representing the scaling factors
+            for the corresponding orthonormal directions.
+        np.ndarray:
+            `right_singular_vectors`: Orthonormal column vectors representing the temporal
+            components of the matrix `v`.
+
+    Notes:
+        This is not a full SVD; the result is truncated to preserve efficiency, especially
+        for large matrices. The orthogonality of the left singular vectors holds within the
+        reduced space of the factorization.
     """
     ut_u = u.T.dot(u)
 
@@ -820,13 +840,27 @@ def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray):
     eig_vals = np.array(eig_vals)
     eig_vecs = np.array(eig_vecs)
 
+    good_components = eig_vals > 0
+    eig_vecs = eig_vecs[:, good_components]
+    eig_vals = eig_vals[good_components]
+
     # Apply the eigenvectors to random_mat
     spatial_mixing_matrix = np.array(jnp.matmul(right_mat, eig_vecs))
 
     singular_values = np.sqrt(eig_vals)
     spatial_mixing_matrix /= singular_values[None, :]
 
-    return u, spatial_mixing_matrix, singular_values, eig_vecs.T
+    """
+    Now we have u and spatial_mixing_matrix, which together form left singular vectors
+    Our new factorization is (UP)(UP)^TUV = UP(P^TU^TUV). Remains to take the SVD of 
+    P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU) 
+    """
+    if only_left:
+        return spatial_mixing_matrix
+    else:
+        new_temporal = spatial_mixing_matrix.T @ (ut_u.dot(v))
+        spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(spatial_mixing_matrix, new_temporal)
+        return spatial_mixing_matrix, singular_values, right_singular_vectors
 
 
 def compute_pruned_orthogonal_spatial_basis(
