@@ -737,14 +737,18 @@ def localmd_decomposition(
     if rank_prune:
 
         if rank_prune_factor <= 0 or rank_prune_factor > 1:
-            raise ValueError("Rank prune factor should be a value in the interval (0, 1]")
+            raise ValueError(
+                "Rank prune factor should be a value in the interval (0, 1]"
+            )
 
         min_dimension = min(u_r.shape[1], v_cropped.shape[1])
         random_mat = np.random.normal(
             0, 1, size=(v_cropped.shape[1], int(min_dimension * rank_prune_factor))
         )
         temporal_mat_to_reformat = np.array(jnp.matmul(v_cropped, random_mat))
-        p = compute_lowrank_factorized_svd(u_r, temporal_mat_to_reformat, only_left=True)
+        p = compute_lowrank_factorized_svd(
+            u_r, temporal_mat_to_reformat, only_left=True
+        )
     else:
         p = compute_lowrank_factorized_svd(u_r, v_cropped, only_left=True)
     display(
@@ -799,7 +803,9 @@ def aggregate_local_and_global_decomposition(
     return u_net, v_net
 
 
-def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray, only_left:bool=False):
+def compute_lowrank_factorized_svd(
+    u: coo_matrix, v: np.ndarray, only_left: bool = False
+):
     """
     Compute the factorized Singular Value Decomposition (SVD) of a low-rank matrix factorization.
 
@@ -859,18 +865,20 @@ def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray, only_left:bool=
     singular_values = np.sqrt(eig_vals)
     spatial_mixing_matrix /= singular_values[None, :]
 
-
     if only_left:
         return spatial_mixing_matrix
     else:
         """
         Now we have u and spatial_mixing_matrix, which together form left singular vectors
-        Our new factorization is (UP)(UP)^TUV = UP(P^TU^TUV). Remains to take the SVD of 
-        P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU) 
+        Our new factorization is (UP)(UP)^TUV = UP(P^TU^TUV). Remains to take the SVD of
+        P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU)
         """
-        new_temporal = jnp.matmul(spatial_mixing_matrix.T , (ut_u.dot(v)))
-        spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(spatial_mixing_matrix, new_temporal)
+        new_temporal = jnp.matmul(spatial_mixing_matrix.T, (ut_u.dot(v)))
+        spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(
+            spatial_mixing_matrix, new_temporal
+        )
         return spatial_mixing_matrix, singular_values, right_singular_vectors
+
 
 def eigenvalue_and_eigenvector_routine(sigma):
     eig_vals, eig_vecs = jnp.linalg.eigh(sigma)  # Note: eig vals/vecs ascending
