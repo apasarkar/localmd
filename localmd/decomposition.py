@@ -859,14 +859,15 @@ def compute_lowrank_factorized_svd(u: coo_matrix, v: np.ndarray, only_left:bool=
     singular_values = np.sqrt(eig_vals)
     spatial_mixing_matrix /= singular_values[None, :]
 
-    """
-    Now we have u and spatial_mixing_matrix, which together form left singular vectors
-    Our new factorization is (UP)(UP)^TUV = UP(P^TU^TUV). Remains to take the SVD of 
-    P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU) 
-    """
+
     if only_left:
         return spatial_mixing_matrix
     else:
+        """
+        Now we have u and spatial_mixing_matrix, which together form left singular vectors
+        Our new factorization is (UP)(UP)^TUV = UP(P^TU^TUV). Remains to take the SVD of 
+        P^TU^TUV, and a lot of those computations are already done above (for e.g. U^TU) 
+        """
         new_temporal = jnp.matmul(spatial_mixing_matrix.T , (ut_u.dot(v)))
         spatial_mixing_matrix, singular_values, right_singular_vectors = factored_svd(spatial_mixing_matrix, new_temporal)
         return spatial_mixing_matrix, singular_values, right_singular_vectors
