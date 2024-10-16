@@ -758,7 +758,7 @@ def localmd_decomposition(
 
     ## Step 2f: Do sparse regression to get the v matrix:
     display("Running sparse regression")
-    v = load_obj.v_projection(u_r, p.T)
+    v = load_obj.v_projection(u_r, p)
 
     # Extract necessary info from the loader object and delete it. This frees up space on GPU for the below linalg.eigh computations
     std_img = load_obj.std_img
