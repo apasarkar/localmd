@@ -742,9 +742,10 @@ def localmd_decomposition(
             )
 
         min_dimension = min(u_r.shape[1], v_cropped.shape[1])
-        random_mat = np.random.normal(
-            0, 1, size=(v_cropped.shape[1], int(min_dimension * rank_prune_factor))
-        )
+
+        random_key = make_jax_random_key()
+        random_mat = jax.random.normal(
+            random_key, (v_cropped.shape[1], int(min_dimension * rank_prune_factor)))
         temporal_mat_to_reformat = np.array(jnp.matmul(v_cropped, random_mat))
         p = compute_lowrank_factorized_svd(
             u_r, temporal_mat_to_reformat, only_left=True
