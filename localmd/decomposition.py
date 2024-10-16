@@ -989,11 +989,15 @@ def projected_svd(
     d1, d2 = data.shape
     if d1 <= d2:
         display("Short matrix, using leftward SVD routine")
-        left_singular_vectors, singular_values, right_singular_vectors = fewer_rows_svd_routine(data)
+        left_singular_vectors, singular_values, right_singular_vectors = (
+            fewer_rows_svd_routine(data)
+        )
         left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
     else:
         display("Tall matrix, using rightward SVD routine")
-        left_singular_vectors, singular_values, right_singular_vectors = fewer_columns_svd_routine(data)
+        left_singular_vectors, singular_values, right_singular_vectors = (
+            fewer_columns_svd_routine(data)
+        )
         left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
 
     return left_singular_vectors, singular_values, right_singular_vectors
@@ -1001,7 +1005,7 @@ def projected_svd(
 
 @partial(jit)
 def fewer_rows_svd_routine(
-    data: jnp.ndarray
+    data: jnp.ndarray,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Computes the Singular Value Decomposition (SVD) for a matrix with more rows than columns
@@ -1026,7 +1030,9 @@ def fewer_rows_svd_routine(
               for the original feature space.
     """
     v_vt = jnp.matmul(data, data.transpose())
-    left_singular_vectors, vals, _ = jnp.linalg.svd(v_vt, full_matrices=False, hermitian=True)
+    left_singular_vectors, vals, _ = jnp.linalg.svd(
+        v_vt, full_matrices=False, hermitian=True
+    )
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
     right_singular_matrix = jnp.divide(
@@ -1038,7 +1044,7 @@ def fewer_rows_svd_routine(
 
 @partial(jit)
 def fewer_columns_svd_routine(
-    data: jnp.ndarray
+    data: jnp.ndarray,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Computes the Singular Value Decomposition (SVD) for a matrix with more columns than rows
@@ -1067,6 +1073,8 @@ def fewer_columns_svd_routine(
     singular_values = jnp.sqrt(vals)
     divisor = jnp.where(singular_values == 0, 1, singular_values)
 
-    left_singular_vectors = jnp.matmul(data, jnp.divide(right_t, jnp.expand_dims(divisor, axis=0)))
+    left_singular_vectors = jnp.matmul(
+        data, jnp.divide(right_t, jnp.expand_dims(divisor, axis=0))
+    )
 
     return left_singular_vectors, singular_values, right_t.transpose()
