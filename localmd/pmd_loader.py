@@ -300,19 +300,19 @@ class PMDLoader:
         )
         return np.array(spatial_basis).astype(self.dtype)
 
-    def v_projection(self, u: coo_matrix, inv_term: np.ndarray):
+    def v_projection(self, u: coo_matrix, spatial_mixing_matrix: np.ndarray):
         """
-        Routine that projects the data onto the spatial matrix
+        Routine that projects the data onto the spatial matrix.
         Args:
             u (scipy.sparse.coo_matrix): Shape (d, R) where d is number of pixels, R is rank.
                 Spatial basis of decomposition
-            inv_term (np.ndarray): The inverse term of the linear subspace projection formula
+            spatial_mixing_matrix (np.ndarray): U @ spatial_mixing_matrix gives a matrix with orthonormal columns
 
         Returns:
             (np.ndarray): The result of projecting the whole centered and normalized data onto the spatial basis u
         """
         sparse_projection_term = BCOO.from_scipy_sparse(u.T)
-
+        dense_projection_term = spatial_mixing_matrix.T
         mean_img_r = self.mean_img.reshape((-1, 1), order=self.order)
         std_img_r = self.std_img.reshape((-1, 1), order=self.order)
 
@@ -320,7 +320,7 @@ class PMDLoader:
         for i, data in enumerate(tqdm(self.loader), 0):
             output = v_projection_routine(
                 self.order,
-                inv_term,
+                dense_projection_term,
                 sparse_projection_term,
                 data,
                 mean_img_r,
@@ -377,20 +377,25 @@ def standardize_and_filter(new_data, mean_img, std_img, spatial_basis):
 
 
 @partial(jit, static_argnums=(0))
-def v_projection_routine(order, inv_term, m, d, mean_img_r, std_img_r):
-    d = jnp.reshape(d, (-1, d.shape[2]), order=order)
-    d = d - mean_img_r
-    d = d / std_img_r
-    output = v_projection_inner_loop(inv_term, m, d)
+def v_projection_routine(
+    order, dense_projection_term, sparse_projection_term, data, mean_img_r, std_img_r
+):
+    data = jnp.reshape(data, (-1, data.shape[2]), order=order)
+    centered_data = (data - mean_img_r) / std_img_r
+    output = v_projection_inner_loop(
+        dense_projection_term, sparse_projection_term, centered_data
+    )
     return output
 
 
 # @sparse.sparsify
-def v_projection_inner_loop(inv_term: ArrayLike, m: ArrayLike, d: ArrayLike) -> Array:
+def v_projection_inner_loop(
+    dense_projector: ArrayLike, sparse_projector: ArrayLike, data: ArrayLike
+) -> Array:
     """
     Inner loop of V projection step
     """
-    output = m @ d
-    output = inv_term @ output
+    output = sparse_projector @ data
+    output = dense_projector @ output
 
     return output
