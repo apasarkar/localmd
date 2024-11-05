@@ -548,7 +548,8 @@ def localmd_decomposition(
     rank_prune_factor: float = 0.33,
     temporal_avg_factor: int = 10,
     order: str = "F",
-    window_chunks = 2000,
+    window_chunks: Optional[int] = None,
+    compute_normalizer: bool = True
 ):
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(
@@ -559,8 +560,11 @@ def localmd_decomposition(
         num_workers=num_workers,
         pixel_batch_size=pixel_batch_size,
         order=order,
+        compute_normalizer = compute_normalizer
     )
 
+    if window_chunks is None:
+        window_chunks = frame_range
     # Decide which chunks of the data you will use for the spatial PMD blockwise fits
     if load_obj.shape[0] < frame_range:
         display("WARNING: Specified using more frames than there are in the dataset.")

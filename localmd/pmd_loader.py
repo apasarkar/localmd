@@ -117,8 +117,8 @@ class PMDLoader:
         batch_size: int = 2000,
         num_workers: int = None,
         pixel_batch_size: int = 5000,
-        num_samples: int = 10,
         order: str = "F",
+        compute_normalizer: bool = True
     ):
         """
         Args:
@@ -132,11 +132,9 @@ class PMDLoader:
             num_workers: int, keep it at 0 for now. Number of workers used in pytorch dataloading.
                 Experimental and best kept at 0.
             pixel_batch_size: int. maximum number of pixels of data we load onto GPU at any point in time
-            num_samples: int. when we estimate mean and noise variance, we take 8 samples of the data, each sample has
-                'batch_size' number of continuous frames. If there are fewer than num_samples * batch_size frames in
-                the dataset, we just sequentially load the entire dataset to get these estimates.
             order (str): "F" or "C" depending whether the 2D images in the video should be reshaped into a flattened,
                 1D column vector in column major ("F") or row major ("C") order
+            compute_normalizer (bool): Whether we compute a noise variance estimate per pixel in the normalizer
         """
         self._order = order
         self.dataset = dataset
@@ -145,7 +143,7 @@ class PMDLoader:
         self.shape = self.dataset.shape
         self.batch_size = batch_size
         self.pixel_batch_size = pixel_batch_size
-        self.num_samples = num_samples
+        self._compute_normalizer = compute_normalizer
 
         def regular_collate(batch):
             return batch[0]
@@ -207,14 +205,17 @@ class PMDLoader:
         This function takes a full pass through the dataset and calculates the mean and noise variance at the
         same time
         """
+        normalizer_flag = self._compute_normalizer
+        if normalizer_flag:
+            display("We are normalizing each pixel by a noise variance estimate")
+        else:
+            display("We are not normalizing each pixel by a noise variance estimate")
         if self.shape[0] < min_allowed_frames:
-            raise ValueError(
-                "Data does not have enough frames for noise estimation procedure"
-            )
+            normalizer_flag = False
 
         display("Calculating mean and noise variance")
         overall_mean = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
-        overall_normalizer = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
+        overall_normalizer = np.ones((self.shape[1], self.shape[2]), dtype=self.dtype)
 
         divisor = math.ceil(math.sqrt(self.pixel_batch_size))
         if self.shape[1] - divisor <= 0:
@@ -253,7 +254,7 @@ class PMDLoader:
                     crop_data = data[
                         step1 : step1 + divisor, step2 : step2 + divisor, :
                     ]
-                    if crop_data.shape[2] >= min_allowed_frames:
+                    if crop_data.shape[2] >= min_allowed_frames and normalizer_flag:
                         mean_value, noise_est_2d = get_mean_and_noise(
                             crop_data, self.shape[0]
                         )
@@ -263,6 +264,7 @@ class PMDLoader:
                         normalizer_net[
                             step1 : step1 + divisor, step2 : step2 + divisor
                         ] = np.array(noise_est_2d)
+
                     else:
                         mean_value = get_mean_chunk(crop_data, self.shape[0])
                         mean_value_net[
@@ -270,10 +272,13 @@ class PMDLoader:
                         ] = np.array(mean_value)
 
             overall_mean += mean_value_net
-            overall_normalizer += normalizer_net / len(elts_used)
-        if elts_for_var_est != 0:
+
+            if normalizer_flag:
+                overall_normalizer += normalizer_net / len(elts_used)
+
+        if normalizer_flag and elts_for_var_est != 0:
             overall_normalizer *= len(elts_used) / elts_for_var_est
-        overall_normalizer[overall_normalizer == 0] = 1
+            overall_normalizer[overall_normalizer == 0] = 1
         display("Finished mean and noise variance")
         return overall_mean, overall_normalizer
 
