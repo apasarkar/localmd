@@ -215,7 +215,11 @@ class PMDLoader:
 
         display("Calculating mean and noise variance")
         overall_mean = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
-        overall_normalizer = np.ones((self.shape[1], self.shape[2]), dtype=self.dtype)
+
+        if normalizer_flag:
+            overall_normalizer = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
+        else:
+            overall_normalizer = np.ones((self.shape[1], self.shape[2]), dtype=self.dtype)
 
         divisor = math.ceil(math.sqrt(self.pixel_batch_size))
         if self.shape[1] - divisor <= 0:
