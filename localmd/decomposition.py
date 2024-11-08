@@ -548,6 +548,9 @@ def localmd_decomposition(
     rank_prune_factor: float = 0.33,
     temporal_avg_factor: int = 10,
     order: str = "F",
+    window_chunks: Optional[int] = None,
+    compute_normalizer: bool = True,
+    pixel_weighting: Optional[np.ndarray] = None
 ):
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(
@@ -558,31 +561,23 @@ def localmd_decomposition(
         num_workers=num_workers,
         pixel_batch_size=pixel_batch_size,
         order=order,
+        compute_normalizer = compute_normalizer
     )
 
+    if window_chunks is None:
+        window_chunks = frame_range
     # Decide which chunks of the data you will use for the spatial PMD blockwise fits
-    window_chunks = 2000  # We will sample chunks of frames throughout the movie
-    if load_obj.shape[0] <= frame_range:
+    if load_obj.shape[0] < frame_range:
         display("WARNING: Specified using more frames than there are in the dataset.")
         frame_range = load_obj.shape[0]
         start = 0
         end = load_obj.shape[0]
         frames = [i for i in range(start, end)]
         if frame_range <= window_chunks:
-            display(
-                "WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
-                    window_chunks
-                )
-            )
             window_chunks = frame_range
     else:
         if frame_range <= window_chunks:
-            if frame_range < window_chunks:
-                display(
-                    "WARNING: Initializing on less than {} frames, this will lead to limited benefits.".format(
-                        window_chunks
-                    )
-                )
+
             window_chunks = frame_range
         frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
@@ -608,6 +603,9 @@ def localmd_decomposition(
     ##Load the data you will do blockwise SVD on
     display("Loading Data")
     data, temporal_basis_crop = load_obj.temporal_crop_with_filter(frames)
+
+    if pixel_weighting is not None:
+        data *= pixel_weighting[:, :, None]
 
     ##Run PMD and get the compressed spatial representation of the data
     display("Obtaining blocks and running local SVD")
