@@ -549,7 +549,8 @@ def localmd_decomposition(
     temporal_avg_factor: int = 10,
     order: str = "F",
     window_chunks: Optional[int] = None,
-    compute_normalizer: bool = True
+    compute_normalizer: bool = True,
+    pixel_weighting: Optional[np.ndarray] = None
 ):
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(
@@ -602,6 +603,9 @@ def localmd_decomposition(
     ##Load the data you will do blockwise SVD on
     display("Loading Data")
     data, temporal_basis_crop = load_obj.temporal_crop_with_filter(frames)
+
+    if pixel_weighting is not None:
+        data *= pixel_weighting[:, :, None]
 
     ##Run PMD and get the compressed spatial representation of the data
     display("Obtaining blocks and running local SVD")
