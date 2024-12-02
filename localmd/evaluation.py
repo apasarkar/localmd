@@ -212,6 +212,7 @@ def filter_by_failures(
             decisions[k] = False
         elif not decisions[k]:
             number_of_failures += 1
+            decisions[k] = 1 #We keep this component, since we haven't reached full failures yet
             if number_of_failures == max_consecutive_failures:
                 all_fails = True
         else:
