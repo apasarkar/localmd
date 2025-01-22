@@ -773,6 +773,11 @@ def localmd_decomposition(
     s = np.array(s)
     vt = np.array(vt)
 
+    good_components = (s != 0)
+    r = r[:, good_components]
+    s = s[good_components]
+    vt = vt[good_components, :]
+
     display("Matrix decomposition completed")
 
     final_movie = PMDArray(u_r, r, s, vt, shape, order, mean_img, std_img)
