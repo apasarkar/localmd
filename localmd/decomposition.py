@@ -215,7 +215,7 @@ def downsample_average_pooling(array, n):
         computation=jax.lax.add,  # Summation operation
         window_dimensions=window_shape,
         window_strides=strides,
-        padding=padding
+        padding=padding,
     )
 
     count_array = jnp.ones((array.shape[0], array.shape[1], 1))
@@ -225,13 +225,14 @@ def downsample_average_pooling(array, n):
         computation=jax.lax.add,
         window_dimensions=window_shape,
         window_strides=strides,
-        padding="SAME")
+        padding="SAME",
+    )
 
     # Normalize by the number of elements in the pooling window
     return downsampled / divisors[...]
 
 
-@partial(jit, static_argnums=(3,4))
+@partial(jit, static_argnums=(3, 4, 7, 8))
 def single_block_md(
     block: ArrayLike,
     key: ArrayLike,
@@ -240,6 +241,8 @@ def single_block_md(
     spatial_average_factor: int,
     spatial_threshold: float,
     temporal_threshold: float,
+    spatial_denoiser: Callable,
+    temporal_denoiser: Callable,
 ) -> tuple[Array, Array, Array]:
     """
     Runs the low rank truncated SVD decomposition on a subpatch of the data.
@@ -259,7 +262,10 @@ def single_block_md(
             the temporal basis. This is essentially a denoiser.
         spatial_threshold (float): Threshold for deciding if a spatial component is smooth enough to contain signal
         temporal_threshold (float): Threshold for deciding if a temporal component is smooth enough to contain signal.
-
+        spatial_denoiser (Callable): a jax jittable function that takes as input a (num_frames, block dim 1, block dim 2)
+            shaped array and denoises every frame of it. output is also shape (frames, block dim 1, block dim 2).
+        temporal_denoiser (Callable): a jax jittable function that takes as input a (num_traces, num_frames) array and
+            returns a denoised version of all of these traces. output is also shape (num_traces, num_frames)
 
     Returns:
         tuple[Array, Array, Array]: The low-rank decomposition consisting of:
@@ -274,20 +280,46 @@ def single_block_md(
 
     d1_new, d2_new = (block_downsample.shape[0], block_downsample.shape[1])
 
-    block_downsample_temporal_average = jnp.mean(jnp.reshape(
-        block_downsample, (d1_new * d2_new, temporal_avg_factor, t // temporal_avg_factor), order=order), axis = 1)
+    block_downsample_temporal_average = jnp.mean(
+        jnp.reshape(
+            block_downsample,
+            (d1_new * d2_new, temporal_avg_factor, t // temporal_avg_factor),
+            order=order,
+        ),
+        axis=1,
+    )
 
-    u_mat_downsample = truncated_random_svd(block_downsample_temporal_average, key, rank_placeholder)[0]
-    v_mat_spatial_downsample = jnp.matmul(u_mat_downsample.T,
-                                          jnp.reshape(block_downsample, (d1_new * d2_new, t), order=order))
+    u_mat_downsample = truncated_random_svd(
+        block_downsample_temporal_average, key, rank_placeholder
+    )[0]
+    v_mat_spatial_downsample = jnp.matmul(
+        u_mat_downsample.T,
+        jnp.reshape(block_downsample, (d1_new * d2_new, t), order=order),
+    )
 
+    v_mat_spatial_downsample = temporal_denoiser(v_mat_spatial_downsample)
     v_mat_basis = jnp.linalg.svd(v_mat_spatial_downsample, full_matrices=False)[2]
 
-    #Project the full temporal resolution data onto this orthonormal basis
-    spatial_projection_fullres = jnp.matmul(jnp.reshape(block, (d1*d2, t), order=order), v_mat_basis.T)
-    u_final, spatial_s, spatial_v = jnp.linalg.svd(spatial_projection_fullres, full_matrices=False)
+    # Project the full temporal resolution data onto this orthonormal basis
+    spatial_projection_fullres = jnp.matmul(
+        jnp.reshape(block, (d1 * d2, t), order=order), v_mat_basis.T
+    )
+    spatial_projection_fullres = jnp.reshape(
+        spatial_projection_fullres, (d1, d2, v_mat_basis.shape[0]), order=order
+    ).transpose(2, 0, 1)
+    spatial_projection_fullres = spatial_denoiser(spatial_projection_fullres)
+    spatial_projection_fullres = spatial_projection_fullres.transpose(1, 2, 0).reshape(
+        (d1 * d2, v_mat_basis.shape[0]), order=order
+    )
 
-    v_final = jnp.multiply(jnp.expand_dims(spatial_s, axis=1), spatial_v @ v_mat_basis)
+    u_final, spatial_s, spatial_v = jnp.linalg.svd(
+        spatial_projection_fullres, full_matrices=False
+    )
+    v_new = jnp.matmul(u_final.T, jnp.reshape(block, (d1 * d2, t), order=order))
+    v_left, v_sing, v_right = jnp.linalg.svd(v_new, full_matrices=False)
+
+    u_final = u_final @ v_left
+    v_final = jnp.multiply(jnp.expand_dims(v_sing, axis=1), v_right)
     u_final = jnp.reshape(u_final, (d1, d2, u_final.shape[1]), order=order)
 
     # Now we begin the evaluation phase
@@ -383,7 +415,9 @@ def windowed_pmd(
     temporal_threshold: float,
     max_consecutive_failures: int,
     temporal_avg_factor: int,
-    spatial_avg_factor: int
+    spatial_avg_factor: int,
+    spatial_denoiser: Callable,
+    temporal_denoiser: Callable,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Implementation of windowed blockwise decomposition. Given a block of the movie (d1, d2, T), we break the movie
@@ -407,6 +441,10 @@ def windowed_pmd(
         spatial_avg_factor (int): Factor by which we spatially average the block in each field of view dimension.
             Using the temporally and spatially averaged data, we estimate a higher SNR spatial basis, and use this
             to iteratively estimate the full resolution spatial and temporal basis.
+        spatial_denoiser (Callable): a jax jittable function that takes as input a (num_frames, block dim 1, block dim 2)
+            shaped array and denoises every frame of it. output is also shape (frames, block dim 1, block dim 2).
+        temporal_denoiser (Callable): a jax jittable function that takes as input a (num_traces, num_frames) array and
+            returns a denoised version of all of these traces. output is also shape (num_traces, num_frames)
     Returns:
         final_spatial_decomposition (np.ndarray): Shape (d1, d2, num_comps); this describes the spatial basis
         final_temporal_decomposition (np.ndarray): Shape (num_comps, T); this describes the corresponding temporal comps
@@ -429,6 +467,7 @@ def windowed_pmd(
 
     component_counter = 0
     rank_placeholder = np.zeros((max_rank,))
+
     for k in start_points:
         start_value = k
         end_value = start_value + window_length
@@ -443,7 +482,9 @@ def windowed_pmd(
                 temporal_avg_factor,
                 spatial_avg_factor,
                 spatial_threshold,
-                temporal_threshold
+                temporal_threshold,
+                spatial_denoiser,
+                temporal_denoiser,
             )
         else:
             subset = block[:, :, start_value:end_value]
@@ -594,6 +635,11 @@ def check_fov_size(fov_dims: Tuple[int, int], min_allowed_value: int = 10) -> No
             )
 
 
+@partial(jit)
+def identity(x):
+    return x
+
+
 def localmd_decomposition(
     dataset_obj: lazy_data_loader,
     block_sizes: tuple,
@@ -613,7 +659,9 @@ def localmd_decomposition(
     order: str = "F",
     window_chunks: Optional[int] = None,
     compute_normalizer: bool = True,
-    pixel_weighting: Optional[np.ndarray] = None
+    pixel_weighting: Optional[np.ndarray] = None,
+    spatial_denoiser: Optional[Callable] = None,
+    temporal_denoiser: Optional[Callable] = None,
 ):
     check_fov_size((dataset_obj.shape[1], dataset_obj.shape[2]))
     load_obj = PMDLoader(
@@ -624,7 +672,7 @@ def localmd_decomposition(
         num_workers=num_workers,
         pixel_batch_size=pixel_batch_size,
         order=order,
-        compute_normalizer = compute_normalizer
+        compute_normalizer=compute_normalizer,
     )
 
     if window_chunks is None:
@@ -640,7 +688,6 @@ def localmd_decomposition(
             window_chunks = frame_range
     else:
         if frame_range <= window_chunks:
-
             window_chunks = frame_range
         frames = identify_window_chunks(frame_range, load_obj.shape[0], window_chunks)
     display("We are initializing on a total of {} frames".format(len(frames)))
@@ -727,6 +774,19 @@ def localmd_decomposition(
     temporal_basis_crop = temporal_basis_crop[:, :crop_avg_constant]
 
     pairs = []
+
+    # Define placeholder spatial and temporal denoisers (identity functions) if user did not provide them
+    # If no spatial / temporal denoisers were specified, use placeholder functions that return the identity:
+    if spatial_denoiser is None:
+        spatial_denoiser = identity
+    else:
+        spatial_denoiser = jit(spatial_denoiser)
+
+    if temporal_denoiser is None:
+        temporal_denoiser = identity
+    else:
+        temporal_denoiser = jit(temporal_denoiser)
+
     for k in dim_1_iters:
         for j in dim_2_iters:
             pairs.append((k, j))
@@ -742,7 +802,9 @@ def localmd_decomposition(
                 temporal_threshold,
                 max_consecutive_failures,
                 temporal_avg_factor,
-                spatial_avg_factor
+                spatial_avg_factor,
+                spatial_denoiser=spatial_denoiser,
+                temporal_denoiser=temporal_denoiser,
             )
             total_temporal_fit.append(temporal_cropped)
 
@@ -783,9 +845,9 @@ def localmd_decomposition(
 
     display("Normalizing by weights")
     weight_normalization_diag = np.zeros((data.shape[0] * data.shape[1],))
-    weight_normalization_diag[sparse_indices.flatten(order=load_obj.order)] = (
-        cumulative_weights.flatten(order=load_obj.order)
-    )
+    weight_normalization_diag[
+        sparse_indices.flatten(order=load_obj.order)
+    ] = cumulative_weights.flatten(order=load_obj.order)
 
     normalizing_weights = diags([(1 / weight_normalization_diag).ravel()], [0])
     u_r = normalizing_weights.dot(u_r)
@@ -797,7 +859,6 @@ def localmd_decomposition(
 
     display("Performing rank pruning and orthogonalization for fast sparse regression.")
     if rank_prune:
-
         if rank_prune_factor <= 0 or rank_prune_factor > 1:
             raise ValueError(
                 "Rank prune factor should be a value in the interval (0, 1]"
@@ -837,7 +898,7 @@ def localmd_decomposition(
     s = np.array(s)
     vt = np.array(vt)
 
-    good_components = (s != 0)
+    good_components = s != 0
     r = r[:, good_components]
     s = s[good_components]
     vt = vt[good_components, :]
@@ -981,15 +1042,19 @@ def projected_svd(
     d1, d2 = data.shape
     if d1 <= d2:
         display("Short matrix, using leftward SVD routine")
-        left_singular_vectors, singular_values, right_singular_vectors = (
-            fewer_rows_svd_routine(data)
-        )
+        (
+            left_singular_vectors,
+            singular_values,
+            right_singular_vectors,
+        ) = fewer_rows_svd_routine(data)
         left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
     else:
         display("Tall matrix, using rightward SVD routine")
-        left_singular_vectors, singular_values, right_singular_vectors = (
-            fewer_columns_svd_routine(data)
-        )
+        (
+            left_singular_vectors,
+            singular_values,
+            right_singular_vectors,
+        ) = fewer_columns_svd_routine(data)
         left_singular_vectors = jnp.matmul(projection, left_singular_vectors)
 
     return left_singular_vectors, singular_values, right_singular_vectors
