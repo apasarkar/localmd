@@ -118,7 +118,7 @@ class PMDLoader:
         num_workers: int = None,
         pixel_batch_size: int = 5000,
         order: str = "F",
-        compute_normalizer: bool = True
+        compute_normalizer: bool = True,
     ):
         """
         Args:
@@ -217,9 +217,13 @@ class PMDLoader:
         overall_mean = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
 
         if normalizer_flag:
-            overall_normalizer = np.zeros((self.shape[1], self.shape[2]), dtype=self.dtype)
+            overall_normalizer = np.zeros(
+                (self.shape[1], self.shape[2]), dtype=self.dtype
+            )
         else:
-            overall_normalizer = np.ones((self.shape[1], self.shape[2]), dtype=self.dtype)
+            overall_normalizer = np.ones(
+                (self.shape[1], self.shape[2]), dtype=self.dtype
+            )
 
         divisor = math.ceil(math.sqrt(self.pixel_batch_size))
         if self.shape[1] - divisor <= 0:

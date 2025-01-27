@@ -129,7 +129,6 @@ class lazy_data_loader(ABC):
 
 
 class TiffArray(lazy_data_loader):
-
     def __init__(self, filename):
         """
         TiffArray data loading object. Supports loading data from multipage tiff files. Does not use memmap (since
