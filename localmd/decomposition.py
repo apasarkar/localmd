@@ -73,35 +73,6 @@ def truncated_random_svd(
     return u_truncated, s_truncated, v_truncated
 
 
-@partial(jit)
-def decomposition_no_normalize_approx(
-        block: ArrayLike,
-        key: ArrayLike,
-        rank_placeholder: ArrayLike,
-
-) -> tuple[Array, Array]:
-    """
-    Runs the low rank decomposition pipeline without any normalization of pixels (centering, dividing by std dev, etc.)
-
-    Args:
-        block (ArrayLike): Shape (d1, d2, T)
-        key (ArrayLike): jax random key used for random number gen
-        rank_placeholder (ArrayLike): Shape (rank); used to make matrices with specific number of columns
-    """
-    order = "F"
-    d1, d2, t = block.shape
-    block_2d = jnp.reshape(block, (d1 * d2, t), order=order)
-    decomposition = truncated_random_svd(block_2d, key, rank_placeholder)
-
-    u_mat, s_mat, v_mat = decomposition[0], decomposition[1], decomposition[2]
-    v_mat = jnp.multiply(jnp.expand_dims(s_mat, 1), v_mat)
-    u_mat = jnp.reshape(u_mat, (d1, d2, u_mat.shape[1]), order=order)
-    spatial_statistics = spatial_roughness_stat_vmap(u_mat)
-    temporal_statistics = temporal_roughness_stat_vmap(v_mat)
-
-    return spatial_statistics, temporal_statistics
-
-
 @partial(jit, static_argnums=(0, 1, 2, 3, 4, 5, 6))
 def rank_simulation(
     d1: int,
