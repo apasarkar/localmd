@@ -75,7 +75,10 @@ def truncated_random_svd(
 
 @partial(jit)
 def decomposition_no_normalize_approx(
-    block: ArrayLike, key: ArrayLike, rank_placeholder: ArrayLike
+        block: ArrayLike,
+        key: ArrayLike,
+        rank_placeholder: ArrayLike,
+
 ) -> tuple[Array, Array]:
     """
     Runs the low rank decomposition pipeline without any normalization of pixels (centering, dividing by std dev, etc.)
@@ -99,11 +102,15 @@ def decomposition_no_normalize_approx(
     return spatial_statistics, temporal_statistics
 
 
-@partial(jit, static_argnums=(0, 1, 2))
+@partial(jit, static_argnums=(0, 1, 2, 3, 4, 5, 6))
 def rank_simulation(
     d1: int,
     d2: int,
     t: int,
+    spatial_avg_factor: int,
+    temporal_avg_factor: int,
+    spatial_denoiser: Callable,
+    temporal_denoiser: Callable,
     rank_placeholder: ArrayLike,
     key1: ArrayLike,
     key2: ArrayLike,
@@ -125,10 +132,19 @@ def rank_simulation(
             - Temporal statistic(s) of the data
     """
     noise_data = jax.random.normal(key1, (d1, d2, t))
-    spatial, temporal = decomposition_no_normalize_approx(
-        noise_data, key2, rank_placeholder
-    )
-    return spatial, temporal
+
+    spatial_basis, temporal_basis = single_block_md(
+                                        noise_data,
+                                        key2,
+                                        rank_placeholder,
+                                        spatial_avg_factor,
+                                        temporal_avg_factor,
+                                        spatial_denoiser,
+                                        temporal_denoiser)
+
+    spatial_statistic = spatial_roughness_stat_vmap(spatial_basis)
+    temporal_statistic = temporal_roughness_stat_vmap(temporal_basis)
+    return spatial_statistic, temporal_statistic
 
 
 def make_jax_random_key() -> Array:
@@ -146,9 +162,13 @@ def make_jax_random_key() -> Array:
 
 def threshold_heuristic(
     dimensions: tuple[int, int, int],
+    spatial_avg_factor: int,
+    temporal_avg_factor: int,
+    spatial_denoiser: Callable,
+    temporal_denoiser: Callable,
     num_comps: int = 1,
     iters: int = 250,
-    percentile_threshold: float = 5,
+    percentile_threshold: float = 5
 ) -> tuple[float, float]:
     """
     Generates a histogram of spatial and temporal roughness statistics from running the decomposition on random noise.
@@ -176,7 +196,16 @@ def threshold_heuristic(
     for k in range(iters):
         key1 = make_jax_random_key()
         key2 = make_jax_random_key()
-        x, y = rank_simulation(d1, d2, t, rank_placeholder, key1, key2)
+        x, y = rank_simulation(d1,
+                               d2,
+                               t,
+                               spatial_avg_factor,
+                               temporal_avg_factor,
+                               spatial_denoiser,
+                               temporal_denoiser,
+                               rank_placeholder,
+                               key1,
+                               key2)
         spatial_list.append(x)
         temporal_list.append(y)
 
@@ -231,16 +260,13 @@ def downsample_average_pooling(array, n):
     # Normalize by the number of elements in the pooling window
     return downsampled / divisors[...]
 
-
-@partial(jit, static_argnums=(3, 4, 7, 8))
+@partial(jit, static_argnums=(3, 4, 5, 6))
 def single_block_md(
     block: ArrayLike,
     key: ArrayLike,
     rank_placeholder: ArrayLike,
-    temporal_avg_factor: int,
     spatial_average_factor: int,
-    spatial_threshold: float,
-    temporal_threshold: float,
+    temporal_avg_factor: int,
     spatial_denoiser: Callable,
     temporal_denoiser: Callable,
 ) -> tuple[Array, Array, Array]:
@@ -321,6 +347,59 @@ def single_block_md(
     u_final = u_final @ v_left
     v_final = jnp.multiply(jnp.expand_dims(v_sing, axis=1), v_right)
     u_final = jnp.reshape(u_final, (d1, d2, u_final.shape[1]), order=order)
+
+    return u_final, v_final
+
+
+
+@partial(jit, static_argnums=(3, 4, 7, 8))
+def single_block_md_with_decisions(
+    block: ArrayLike,
+    key: ArrayLike,
+    rank_placeholder: ArrayLike,
+    spatial_avg_factor: int,
+    temporal_avg_factor: int,
+    spatial_threshold: float,
+    temporal_threshold: float,
+    spatial_denoiser: Callable,
+    temporal_denoiser: Callable,
+) -> tuple[Array, Array, Array]:
+    """
+    Runs the low rank truncated SVD decomposition on a subpatch of the data.
+    Key assumptions:
+    (1) number of frames in block is divisible by temporal_avg_factor
+    (2) rank_placeholder is smaller than frames // temporal_avg_factor
+
+    Args:
+        block (ArrayLike): Dimensions (block_1, block_2, T).
+            (block_1, block_2) are the dimensions of this patch of data, T is the number of frames.
+                We assume all pixels have mean 0 and noise variance of 1 (data has been normalized)
+        key (ArrayLike): jax PRNG key
+        rank_placeholder (ArrayLike): Shape (rank); used to make matrices with specific number of columns
+        spatial_average_factor (int): The factor by which we spatially average the FOV in each dimension before learning
+            the temporal basis. This is essentially a denoiser.
+        temporal_avg_factor (int): We temporally average chunks frames of raw data to reduce noise; this parameter tells
+            us how many frames are averaged together per "chunk"
+        spatial_threshold (float): Threshold for deciding if a spatial component is smooth enough to contain signal
+        temporal_threshold (float): Threshold for deciding if a temporal component is smooth enough to contain signal.
+        spatial_denoiser (Callable): a jax jittable function that takes as input a (num_frames, block dim 1, block dim 2)
+            shaped array and denoises every frame of it. output is also shape (frames, block dim 1, block dim 2).
+        temporal_denoiser (Callable): a jax jittable function that takes as input a (num_traces, num_frames) array and
+            returns a denoised version of all of these traces. output is also shape (num_traces, num_frames)
+
+    Returns:
+        tuple[Array, Array, Array]: The low-rank decomposition consisting of:
+            - An orthogonal spatial basis of the data
+            - A binary vector describing which components to keep based on the roughness statistic procedure
+            - A temporal basis of the data
+    """
+    u_final, v_final = single_block_md(block,
+                                       key,
+                                       rank_placeholder,
+                                       spatial_avg_factor,
+                                       temporal_avg_factor,
+                                       spatial_denoiser,
+                                       temporal_denoiser)
 
     # Now we begin the evaluation phase
     good_comps = construct_final_fitness_decision(
@@ -414,8 +493,8 @@ def windowed_pmd(
     spatial_threshold: float,
     temporal_threshold: float,
     max_consecutive_failures: int,
-    temporal_avg_factor: int,
     spatial_avg_factor: int,
+    temporal_avg_factor: int,
     spatial_denoiser: Callable,
     temporal_denoiser: Callable,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -436,11 +515,11 @@ def windowed_pmd(
         max_consecutive_failures (int): After running the truncated SVD on this data, we look at each pair of rank-1
             components (spatial, temporal) in order of significance (singular values). Once the hypothesis test fails a
             certain number of times on this data, we discard all subsequent components from the decomposition.
-        temporal_avg_factor (int): We temporally average chunks frames of raw data to reduce noise; this parameter tells
-            us how many frames are averaged together per "chunk"
         spatial_avg_factor (int): Factor by which we spatially average the block in each field of view dimension.
             Using the temporally and spatially averaged data, we estimate a higher SNR spatial basis, and use this
             to iteratively estimate the full resolution spatial and temporal basis.
+        temporal_avg_factor (int): We temporally average chunks frames of raw data to reduce noise; this parameter tells
+            us how many frames are averaged together per "chunk"
         spatial_denoiser (Callable): a jax jittable function that takes as input a (num_frames, block dim 1, block dim 2)
             shaped array and denoises every frame of it. output is also shape (frames, block dim 1, block dim 2).
         temporal_denoiser (Callable): a jax jittable function that takes as input a (num_traces, num_frames) array and
@@ -475,12 +554,12 @@ def windowed_pmd(
         key = make_jax_random_key()
         if k == 0 or component_counter == 0:
             subset = block[:, :, start_value:end_value]
-            spatial_comps, decisions, _ = single_block_md(
+            spatial_comps, decisions, _ = single_block_md_with_decisions(
                 subset,
                 key,
                 rank_placeholder,
-                temporal_avg_factor,
                 spatial_avg_factor,
+                temporal_avg_factor,
                 spatial_threshold,
                 temporal_threshold,
                 spatial_denoiser,
@@ -654,8 +733,8 @@ def localmd_decomposition(
     max_consecutive_failures=1,
     rank_prune: bool = False,
     rank_prune_factor: float = 0.33,
-    temporal_avg_factor: int = 10,
-    spatial_avg_factor: int = 2,
+    spatial_avg_factor: int = 1,
+    temporal_avg_factor: int = 1,
     order: str = "F",
     window_chunks: Optional[int] = None,
     compute_normalizer: bool = True,
@@ -697,28 +776,13 @@ def localmd_decomposition(
     )
     overlap = [math.ceil(block_sizes[0] / 2), math.ceil(block_sizes[1] / 2)]
 
-    ##Get the spatial and temporal thresholds
-    display(
-        "Running Simulations, block dimensions are {} x {} x {} ".format(
-            block_sizes[0], block_sizes[1], window_chunks
-        )
-    )
-    spatial_threshold, temporal_threshold = threshold_heuristic(
-        [block_sizes[0], block_sizes[1], window_chunks],
-        num_comps=1,
-        iters=250,
-        percentile_threshold=sim_conf,
-    )
-
     ##Load the data you will do blockwise SVD on
     display("Loading Data")
     data, temporal_basis_crop = load_obj.temporal_crop_with_filter(frames)
 
     if pixel_weighting is not None:
         data *= pixel_weighting[:, :, None]
-
-    ##Run PMD and get the compressed spatial representation of the data
-    display("Obtaining blocks and running local SVD")
+    display("Data Load Complete")
 
     dim_1_iters = list(
         range(0, data.shape[0] - block_sizes[0] + 1, block_sizes[0] - overlap[0])
@@ -787,6 +851,26 @@ def localmd_decomposition(
     else:
         temporal_denoiser = jit(temporal_denoiser)
 
+    ##Get the spatial and temporal thresholds
+    display(
+        "Running Simulations, block dimensions are {} x {} x {} ".format(
+            block_sizes[0], block_sizes[1], window_chunks
+        )
+    )
+    spatial_threshold, temporal_threshold = threshold_heuristic(
+        [block_sizes[0], block_sizes[1], window_chunks],
+        spatial_avg_factor,
+        temporal_avg_factor,
+        spatial_denoiser,
+        temporal_denoiser,
+        num_comps=1,
+        iters=250,
+        percentile_threshold=sim_conf,
+    )
+
+    ##Run PMD and get the compressed spatial representation of the data
+    display("Obtaining blocks and running local SVD")
+
     for k in dim_1_iters:
         for j in dim_2_iters:
             pairs.append((k, j))
@@ -801,8 +885,8 @@ def localmd_decomposition(
                 spatial_threshold,
                 temporal_threshold,
                 max_consecutive_failures,
-                temporal_avg_factor,
                 spatial_avg_factor,
+                temporal_avg_factor,
                 spatial_denoiser=spatial_denoiser,
                 temporal_denoiser=temporal_denoiser,
             )
