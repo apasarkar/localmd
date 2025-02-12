@@ -162,7 +162,8 @@ def threshold_heuristic(
     spatial_list = []
     temporal_list = []
 
-    d1, d2, t = dimensions
+    temporal_dimension = (dimensions[2] // temporal_avg_factor) * temporal_avg_factor
+    d1, d2, t = dimensions[0], dimensions[1], temporal_dimension
     rank_placeholder = np.zeros((num_comps,))
     for k in range(iters):
         key1 = make_jax_random_key()
@@ -240,7 +241,7 @@ def single_block_md(
     temporal_avg_factor: int,
     spatial_denoiser: Callable,
     temporal_denoiser: Callable,
-) -> tuple[Array, Array, Array]:
+) -> tuple[Array, Array]:
     """
     Runs the low rank truncated SVD decomposition on a subpatch of the data.
     Key assumptions:
